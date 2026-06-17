@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Pulse Screener</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0a0c0f;
+    --bg2:       #10141a;
+    --bg3:       #161b24;
+    --border:    #1e2535;
+    --text:      #c8cdd8;
+    --muted:     #4a5268;
+    --accent:    #4f9cf9;
+    --green:     #22c55e;
+    --yellow:    #eab308;
+    --red:       #ef4444;
+    --blue:      #60a5fa;
+    --purple:    #a78bfa;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+  .logo span { color: var(--muted); font-weight: 300; }
+  .header-date {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ── Layout ── */
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px 24px;
+  }
+
+  /* ── Tier selector ── */
+  .tier-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    width: fit-content;
+  }
+  .tier-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 8px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tier-btn:hover { color: var(--text); background: var(--bg3); }
+  .tier-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* ── Pulse card ── */
+  .pulse-section {
+    margin-bottom: 20px;
+  }
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .pulse-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .pulse-state {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pulse-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pulse-dot.green  { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .pulse-dot.yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+  .pulse-dot.red    { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .pulse-dot.blue   { background: var(--blue); box-shadow: 0 0 8px var(--blue); }
+  .pulse-dot.grey   { background: var(--muted); }
+  .pulse-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .pulse-meta {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .pulse-stat { display: flex; flex-direction: column; gap: 2px; }
+  .pulse-stat .k {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .pulse-stat .v {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .pulse-action {
+    margin-left: auto;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    max-width: 260px;
+    line-height: 1.4;
+  }
+  .pulse-load-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+  }
+  .pulse-load-btn:hover { border-color: var(--accent); }
+  .pulse-load-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Screen panel ── */
+  .screens {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 900px) { .screens { grid-template-columns: 1fr; } }
+  .screen-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+  }
+  .screen-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .screen-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text);
+  }
+  .screen-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .run-btn {
+    background: var(--accent);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 8px 16px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .run-btn:hover { opacity: 0.85; }
+  .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .run-btn.s2 { background: var(--purple); }
+
+  /* ── Progress ── */
+  .progress-wrap {
+    margin-top: 10px;
+    display: none;
+  }
+  .progress-bar-bg {
+    background: var(--bg3);
+    border-radius: 2px;
+    height: 3px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s;
+  }
+  .progress-text {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .log-line {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── Results table ── */
+  .results-section {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 16px;
+  }
+  .results-header {
+    padding: 12px 20px;
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .results-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text);
+  }
+  .stage-counts {
+    display: flex;
+    gap: 12px;
+  }
+  .stage-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  .stage-badge.full   { border-color: var(--green); color: var(--green); }
+  .stage-badge.mid    { border-color: var(--yellow); color: var(--yellow); }
+  .stage-badge.fast   { border-color: var(--red); color: var(--red); }
+
+  /* Filters */
+  .filters {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .filter-label { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .filter-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .filter-btn.active { border-color: var(--accent); color: var(--accent); }
+  .search-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    outline: none;
+    margin-left: auto;
+    width: 160px;
+  }
+  .search-box:focus { border-color: var(--accent); }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  thead th {
+    background: var(--bg3);
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th:hover { color: var(--text); }
+  thead th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+  thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+  tbody tr {
+    border-bottom: 1px solid rgba(30,37,53,0.6);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--bg3); }
+  td { padding: 7px 12px; white-space: nowrap; }
+  .ticker-cell {
+    color: var(--accent);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .ticker-cell a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .ticker-cell a:hover { text-decoration: underline; }
+
+  /* Stage badges inline */
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    border: 1px solid;
+  }
+  .badge.FULL   { border-color: var(--green);  color: var(--green); }
+  .badge.MID    { border-color: var(--yellow); color: var(--yellow); }
+  .badge.FAST   { border-color: var(--red);    color: var(--red); }
+
+  .action-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+  .action-badge.ACTIONABLE { background: rgba(34,197,94,0.15); color: var(--green); }
+  .action-badge.CAUTION    { background: rgba(234,179,8,0.15);  color: var(--yellow); }
+  .action-badge.WATCHLIST  { background: rgba(74,82,104,0.2);   color: var(--muted); }
+
+  .stock-pulse {
+    font-size: 10px;
+    font-weight: 500;
+  }
+  .stock-pulse.CONFIRMED { color: var(--green); }
+  .stock-pulse.PRESSURE  { color: var(--yellow); }
+  .stock-pulse.RALLY     { color: var(--blue); }
+  .stock-pulse.DOWNTREND { color: var(--red); }
+
+  .num-pos { color: var(--green); }
+  .num-neg { color: var(--red); }
+  .num-neu { color: var(--text); }
+
+  /* Pagination */
+  .pagination {
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .page-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .page-info { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+  /* Empty / loading states */
+  .empty-state {
+    padding: 32px 20px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    z-index: 999;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.hidden { opacity: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">MARKET PULSE <span>/ SCREENER</span></div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="header-date" id="headerDate"></div>
+    <a href="/logout" style="font-family:var(--mono);font-size:10px;color:var(--muted);text-decoration:none;letter-spacing:0.08em;border:1px solid var(--border);padding:4px 10px;border-radius:3px;">LOGOUT</a>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Tier selector -->
+  <div class="tier-bar" role="group">
+    <button class="tier-btn active" data-tier="smallcap" onclick="setTier('smallcap')">SMALL CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">0 – 30,000 Cr</span></button>
+    <button class="tier-btn" data-tier="midcap" onclick="setTier('midcap')">MID CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">30,000 – 50,000 Cr</span></button>
+    <button class="tier-btn" data-tier="largecap" onclick="setTier('largecap')">LARGE CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">50,000 Cr+</span></button>
+  </div>
+
+  <!-- Pulse -->
+  <div class="pulse-section">
+    <div class="section-label">Market Pulse</div>
+    <div class="pulse-card" id="pulseCard">
+      <div class="pulse-state">
+        <div class="pulse-dot grey" id="pulseDot"></div>
+        <div class="pulse-label" id="pulseLabel">—</div>
+      </div>
+      <div class="pulse-meta" id="pulseMeta">
+        <div class="pulse-stat"><div class="k">Index</div><div class="v" id="metaIndex">—</div></div>
+        <div class="pulse-stat"><div class="k">1D</div><div class="v" id="meta1d">—</div></div>
+        <div class="pulse-stat"><div class="k">5D</div><div class="v" id="meta5d">—</div></div>
+        <div class="pulse-stat"><div class="k">Dist Days</div><div class="v" id="metaDist">—</div></div>
+        <div class="pulse-stat"><div class="k">Rally</div><div class="v" id="metaRally">—</div></div>
+        <div class="pulse-stat"><div class="k">FTD</div><div class="v" id="metaFtd">—</div></div>
+      </div>
+      <div class="pulse-action" id="pulseAction">Load pulse to see market state →</div>
+      <button class="pulse-load-btn" id="pulseBtn" onclick="loadPulse()">▶ LOAD PULSE</button>
+    </div>
+  </div>
+
+  <!-- Screens -->
+  <div class="screens">
+    <!-- Screen 1 -->
+    <div class="screen-panel">
+      <div class="screen-header">
+        <div>
+          <div class="screen-title">SCREEN 1 — EMA COMPRESSION + 200 DMA</div>
+          <div class="screen-sub">200 DMA rising · EMA 8-55 compressing</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="run-btn" id="s1Btn" onclick="runScreen1()">LOAD</button>
+          <button class="run-btn" id="rescanBtn" onclick="triggerRescan()" style="background:var(--muted);font-size:10px;padding:8px 10px" title="Re-scan all tickers (runs in background ~10-15 min)">↻ RESCAN</button>
+        </div>
+      </div>
+      <div class="progress-wrap" id="s1Progress">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="s1Bar"></div></div>
+        <div class="progress-text" id="s1ProgText">Fetching universe…</div>
+        <div class="log-line" id="s1Log"></div>
+      </div>
+    </div>
+
+    <!-- Screen 2 -->
+    <div class="screen-panel">
+      <div class="screen-header">
+        <div>
+          <div class="screen-title">SCREEN 2 — PULSE ANALYSIS</div>
+          <div class="screen-sub">Distribution days · Follow-through · Stock-level trend state</div>
+        </div>
+        <button class="run-btn s2" id="s2Btn" onclick="runScreen2()" disabled>RUN</button>
+      </div>
+      <div class="progress-wrap" id="s2Progress">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="s2Bar" style="background:var(--purple)"></div></div>
+        <div class="progress-text" id="s2ProgText">Waiting for Screen 1…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="resultsSection" style="display:none">
+    <div class="results-section">
+      <div class="results-header">
+        <div>
+          <div class="results-title" id="resultsTitle">Results</div>
+        </div>
+        <div class="stage-counts" id="stageCounts"></div>
+      </div>
+      <div class="filters" id="filtersRow">
+        <span class="filter-label">STAGE:</span>
+        <button class="filter-btn active" onclick="setFilter('stage','ALL',this)">ALL</button>
+        <button class="filter-btn" onclick="setFilter('stage','FULL',this)">FULL</button>
+        <button class="filter-btn" onclick="setFilter('stage','MID',this)">MID</button>
+        <button class="filter-btn" onclick="setFilter('stage','FAST',this)">FAST</button>
+        <span class="filter-label" style="margin-left:12px">ACTION:</span>
+        <button class="filter-btn active" onclick="setFilter('action','ALL',this)" id="actionAll">ALL</button>
+        <button class="filter-btn" onclick="setFilter('action','ACTIONABLE',this)">ACTIONABLE</button>
+        <button class="filter-btn" onclick="setFilter('action','CAUTION',this)">CAUTION</button>
+        <button class="filter-btn" onclick="setFilter('action','WATCHLIST',this)">WATCHLIST</button>
+        <input class="search-box" id="searchBox" placeholder="Search ticker…" oninput="renderTable()">
+      </div>
+      <div class="table-wrap">
+        <table id="resultsTable">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        <div class="empty-state" id="emptyState" style="display:none">No results match filter.</div>
+      </div>
+      <div class="pagination" id="paginationRow">
+        <button class="page-btn" onclick="prevPage()" id="prevBtn">← Prev</button>
+        <span class="page-info" id="pageInfo"></span>
+        <button class="page-btn" onclick="nextPage()" id="nextBtn">Next →</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script>
+const PAGE_SIZE = 50;
+let currentTier = 'smallcap';
+let allResults = [];
+let filteredResults = [];
+let currentPage = 1;
+let sortCol = null;
+let sortDir = 1;
+let activeFilters = { stage: 'ALL', action: 'ALL' };
+let screenMode = 'base'; // 'base' or 'pulse'
+
+const TIER_LABELS = {
+  smallcap: 'Small Cap (0–30,000 Cr)',
+  midcap:   'Mid Cap (30,000–50,000 Cr)',
+  largecap: 'Large Cap (50,000 Cr+)',
+};
+
+const COLOR = {
+  green: '#22c55e', yellow: '#eab308', red: '#ef4444', blue: '#60a5fa', grey: '#4a5268'
+};
+const PULSE_COLORS = {
+  'CONFIRMED UPTREND': 'green',
+  'UNDER PRESSURE':    'yellow',
+  'RALLY ATTEMPT':     'blue',
+  'DOWNTREND':         'red',
+};
+
+function init() {
+  document.getElementById('headerDate').textContent = new Date().toLocaleDateString('en-GB', {
+    day:'2-digit', month:'short', year:'numeric'
+  }).toUpperCase();
+}
+
+function setTier(tier) {
+  currentTier = tier;
+  document.querySelectorAll('.tier-btn').forEach(b => b.classList.toggle('active', b.dataset.tier === tier));
+  resetPulse();
+  resetResults();
+  document.getElementById('s2Btn').disabled = true;
+  document.getElementById('s2ProgText').textContent = 'Waiting for Screen 1…';
+  // Try to load cached results
+  checkCache();
+}
+
+function checkCache() {
+  fetch(`/api/cache/base/${currentTier}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.cached) {
+        allResults = data.results;
+        screenMode = 'base';
+        showToast(`Loaded ${allResults.length} cached results from today`);
+        document.getElementById('s2Btn').disabled = false;
+        renderResults('base');
+        activeFilters = { stage: 'ALL', action: 'ALL' };
+        resetFilterUI();
+      }
+    }).catch(() => {});
+}
+
+function resetPulse() {
+  document.getElementById('pulseLabel').textContent = '—';
+  document.getElementById('pulseDot').className = 'pulse-dot grey';
+  document.getElementById('pulseAction').textContent = 'Load pulse to see market state →';
+  ['metaIndex','meta1d','meta5d','metaDist','metaRally','metaFtd'].forEach(id => {
+    document.getElementById(id).textContent = '—';
+  });
+}
+
+function resetResults() {
+  allResults = [];
+  filteredResults = [];
+  document.getElementById('resultsSection').style.display = 'none';
+}
+
+function loadPulse() {
+  const btn = document.getElementById('pulseBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  fetch(`/api/pulse/${currentTier}`)
+    .then(r => r.json())
+    .then(data => {
+      renderPulse(data);
+      btn.textContent = '↻ REFRESH';
+      btn.disabled = false;
+    }).catch(e => {
+      showToast('Pulse load failed: ' + e.message);
+      btn.textContent = '▶ LOAD PULSE';
+      btn.disabled = false;
+    });
+}
+
+function renderPulse(data) {
+  const color = PULSE_COLORS[data.pulse] || 'grey';
+  document.getElementById('pulseDot').className = `pulse-dot ${color}`;
+  document.getElementById('pulseLabel').textContent = data.pulse;
+  document.getElementById('pulseLabel').style.color = COLOR[color];
+  document.getElementById('metaIndex').textContent = data.index_label || data.index || '—';
+  const fmt1d = data.idx_1d ? (data.idx_1d > 0 ? '+' : '') + data.idx_1d + '%' : '—';
+  const fmt5d = data.idx_5d ? (data.idx_5d > 0 ? '+' : '') + data.idx_5d + '%' : '—';
+  document.getElementById('meta1d').textContent = fmt1d;
+  document.getElementById('meta1d').style.color = data.idx_1d >= 0 ? COLOR.green : COLOR.red;
+  document.getElementById('meta5d').textContent = fmt5d;
+  document.getElementById('meta5d').style.color = data.idx_5d >= 0 ? COLOR.green : COLOR.red;
+  document.getElementById('metaDist').textContent =
+    `${data.dist_count}  (⚠${data.dist_pressure} / 🔻${data.dist_downtrend})`;
+  document.getElementById('metaRally').textContent =
+    data.in_rally ? `Day ${data.rally_day} (FTD zone ${data.ftd_day_min}-${data.ftd_day_max})` : 'None';
+  document.getElementById('metaFtd').textContent =
+    data.ftd ? `✓ Day ${data.ftd_day}` : '—';
+  document.getElementById('pulseAction').textContent =
+    (data.signal && data.signal.action) ? data.signal.action : '—';
+}
+
+function runScreen1() {
+  const btn = document.getElementById('s1Btn');
+  btn.disabled = true;
+  btn.textContent = 'LOADING…';
+  const prog = document.getElementById('s1Progress');
+  prog.style.display = 'block';
+  document.getElementById('s1Bar').style.width = '30%';
+  document.getElementById('s1ProgText').textContent = 'Loading from cache…';
+  document.getElementById('s1Log').textContent = '';
+  document.getElementById('resultsSection').style.display = 'none';
+  allResults = [];
+  screenMode = 'base';
+
+  fetch(`/api/screen/base/${currentTier}`)
+    .then(async r => {
+      const d = await r.json();
+      if (d.type === 'done') {
+        document.getElementById('s1Bar').style.width = '100%';
+        document.getElementById('s1ProgText').textContent =
+          `Loaded from cache — ${d.results.length} stocks (${d.date})`;
+        btn.textContent = '↻ RELOAD';
+        btn.disabled = false;
+        allResults = d.results;
+        document.getElementById('s2Btn').disabled = false;
+        activeFilters = { stage: 'ALL', action: 'ALL' };
+        resetFilterUI();
+        renderResults('base');
+        showToast(`${d.results.length} stocks loaded instantly ⚡`);
+      } else if (d.type === 'scanning') {
+        document.getElementById('s1Bar').style.width = '60%';
+        document.getElementById('s1ProgText').textContent = '⏳ ' + d.message;
+        document.getElementById('s1Log').textContent = '';
+        btn.textContent = 'RUN';
+        btn.disabled = false;
+        // Show clear button in case it's stuck
+        showClearBtn();
+        pollScanStatus();
+      } else if (d.type === 'no_cache') {
+        document.getElementById('s1Bar').style.width = '0%';
+        document.getElementById('s1ProgText').textContent = '⚠ No cache yet — click RESCAN to build (~10-15 min)';
+        document.getElementById('s1Log').textContent = '';
+        btn.textContent = 'RUN';
+        btn.disabled = false;
+        showToast('No cache for today — use Rescan button');
+      } else {
+        document.getElementById('s1ProgText').textContent = d.message || d.error || 'Unknown error';
+        btn.textContent = 'RUN';
+        btn.disabled = false;
+      }
+    })
+    .catch(e => {
+      document.getElementById('s1ProgText').textContent = 'Error: ' + e.message;
+      btn.textContent = 'RUN';
+      btn.disabled = false;
+    });
+}
+
+function triggerRescan() {
+  const btn = document.getElementById('rescanBtn');
+  btn.disabled = true;
+  btn.textContent = 'STARTING…';
+  fetch('/api/scan/run', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'already_running') {
+        showToast('Scan already running — check back in a few minutes');
+      } else {
+        showToast('Full scan started in background (~10-15 min). Page will auto-refresh when ready.');
+        document.getElementById('s1ProgText').textContent = '⏳ Scanning all tickers in background…';
+        document.getElementById('s1Progress').style.display = 'block';
+        document.getElementById('s1Bar').style.width = '10%';
+        pollScanStatus();
+      }
+      btn.textContent = 'RESCAN';
+      btn.disabled = false;
+    })
+    .catch(() => { btn.textContent = 'RESCAN'; btn.disabled = false; });
+}
+
+let _pollTimer = null;
+function pollScanStatus() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(() => {
+    fetch('/api/scan/status')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.scanning && d.caches[currentTier]) {
+          clearInterval(_pollTimer);
+          showToast('Scan complete! Loading results…');
+          document.getElementById('s1Bar').style.width = '95%';
+          setTimeout(() => runScreen1(), 800);
+        } else if (d.scanning) {
+          const done = Object.values(d.caches).filter(Boolean).length;
+          document.getElementById('s1Log').textContent = `Tiers cached so far: ${done}/3`;
+          document.getElementById('s1Bar').style.width = (20 + done * 25) + '%';
+        }
+      });
+  }, 15000); // poll every 15s
+}
+
+function runScreen2() {
+  const btn = document.getElementById('s2Btn');
+  btn.disabled = true;
+  btn.textContent = 'RUNNING…';
+  document.getElementById('s2Progress').style.display = 'block';
+  document.getElementById('s2ProgText').textContent = 'Running pulse analysis…';
+  document.getElementById('s2Bar').style.width = '30%';
+
+  fetch(`/api/screen/pulse/${currentTier}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      document.getElementById('s2Bar').style.width = '100%';
+      document.getElementById('s2ProgText').textContent =
+        `Complete — ${data.total} stocks analysed`;
+      btn.textContent = '↻ RE-RUN';
+      btn.disabled = false;
+      allResults = data.results;
+      screenMode = 'pulse';
+      if (data.pulse) renderPulse(data.pulse);
+      activeFilters = { stage: 'ALL', action: 'ALL' };
+      resetFilterUI();
+      renderResults('pulse');
+      showToast(`Screen 2 complete — ${allResults.length} stocks with pulse`);
+    })
+    .catch(err => {
+      document.getElementById('s2ProgText').textContent = 'Error: ' + err.message;
+      btn.textContent = 'RUN';
+      btn.disabled = false;
+    });
+}
+
+const BASE_COLS = [
+  { key: 'symbol',         label: 'SYMBOL',         fmt: 'symbol' },
+  { key: 'name',           label: 'COMPANY',        fmt: 'company' },
+  { key: 'exchange',       label: 'EXCH',           fmt: 'exch' },
+  { key: 'stage',          label: 'STAGE',          fmt: 'stage' },
+  { key: 'mcap_tier',      label: 'MCAP TIER',      fmt: 'text' },
+  { key: 'mcap_cr',        label: 'MCAP (Cr)',       fmt: 'num0' },
+  { key: 'div_yield',      label: 'DIV %',           fmt: 'num2' },
+  { key: 'price',          label: 'PRICE',           fmt: 'num2' },
+  { key: 'spread_8_55',    label: 'SPREAD 8-55',     fmt: 'num2pos' },
+  { key: 'spread_5d',      label: 'SPREAD 5D',       fmt: 'num2' },
+  { key: 'ema200_slope',   label: '200 DMA SLOPE',   fmt: 'num2signed' },
+  { key: 'pct_off_52h',    label: '% OFF 52H',       fmt: 'num1neg' },
+];
+
+const PULSE_COLS = [
+  { key: 'symbol',      label: 'SYMBOL',       fmt: 'symbol' },
+  { key: 'name',        label: 'COMPANY',      fmt: 'company' },
+  { key: 'exchange',    label: 'EXCH',         fmt: 'exch' },
+  { key: 'stage',       label: 'STAGE',        fmt: 'stage' },
+  { key: 'action',      label: 'ACTION',       fmt: 'action' },
+  { key: 'stock_pulse', label: 'STOCK PULSE',  fmt: 'spulse' },
+  { key: 'dist_days',   label: 'D-DAYS',       fmt: 'ddays' },
+  { key: 'ft_days',     label: 'FT DAY',       fmt: 'ftday' },
+  { key: 'in_rally',    label: 'RALLY',        fmt: 'bool' },
+  { key: 'rally_day',   label: 'RALLY DAY',    fmt: 'num0' },
+  { key: 'mcap_cr',     label: 'MCAP (Cr)',    fmt: 'num0' },
+  { key: 'price',       label: 'PRICE',        fmt: 'num2' },
+  { key: 'spread_8_55', label: 'SPREAD',       fmt: 'num2pos' },
+  { key: 'pct_off_52h', label: '% OFF 52H',   fmt: 'num1neg' },
+];
+
+function renderResults(mode) {
+  document.getElementById('resultsSection').style.display = 'block';
+  const cols = mode === 'pulse' ? PULSE_COLS : BASE_COLS;
+  // Header
+  const actionColVisible = cols.some(c => c.key === 'action');
+  document.getElementById('filtersRow').style.display = actionColVisible ? 'flex' : 'none';
+  // Show action filter only in pulse mode
+  document.querySelectorAll('#filtersRow .filter-btn[onclick*="action"]').forEach(b => {
+    b.style.display = actionColVisible ? '' : 'none';
+  });
+  document.querySelectorAll('#filtersRow .filter-label').forEach((el, i) => {
+    if (i === 1) el.style.display = actionColVisible ? '' : 'none';
+  });
+
+  // Build header
+  const thead = document.getElementById('tableHead');
+  thead.innerHTML = '<tr>' + cols.map(c =>
+    `<th onclick="sortBy('${c.key}')" class="${sortCol===c.key?(sortDir>0?'sort-asc':'sort-desc'):''}">${c.label}</th>`
+  ).join('') + '</tr>';
+
+  // Counts
+  const full = allResults.filter(r => r.stage === 'FULL').length;
+  const mid  = allResults.filter(r => r.stage === 'MID').length;
+  const fast = allResults.filter(r => r.stage === 'FAST').length;
+  document.getElementById('stageCounts').innerHTML =
+    `<span class="stage-badge full">FULL ${full}</span>
+     <span class="stage-badge mid">MID ${mid}</span>
+     <span class="stage-badge fast">FAST ${fast}</span>`;
+
+  const title = mode === 'pulse'
+    ? `Pulse Screen — ${TIER_LABELS[currentTier]}`
+    : `Base Screen — ${TIER_LABELS[currentTier]}`;
+  document.getElementById('resultsTitle').textContent = title;
+
+  applyFilters();
+}
+
+function applyFilters() {
+  const search = document.getElementById('searchBox').value.trim().toUpperCase();
+  filteredResults = allResults.filter(r => {
+    if (activeFilters.stage !== 'ALL' && r.stage !== activeFilters.stage) return false;
+    if (activeFilters.action !== 'ALL' && r.action !== activeFilters.action) return false;
+    if (search && !((r.symbol||r.ticker||'').toUpperCase().includes(search) || (r.name||'').toUpperCase().includes(search))) return false;
+    return true;
+  });
+  currentPage = 1;
+  renderTable();
+}
+
+function renderTable() {
+  const cols = screenMode === 'pulse' ? PULSE_COLS : BASE_COLS;
+  const search = document.getElementById('searchBox').value.trim().toUpperCase();
+  filteredResults = allResults.filter(r => {
+    if (activeFilters.stage !== 'ALL' && r.stage !== activeFilters.stage) return false;
+    if (activeFilters.action !== 'ALL' && r.action !== activeFilters.action) return false;
+    if (search && !((r.symbol||r.ticker||'').toUpperCase().includes(search) || (r.name||'').toUpperCase().includes(search))) return false;
+    return true;
+  });
+
+  if (sortCol) {
+    filteredResults.sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol];
+      if (av == null) av = sortDir > 0 ? Infinity : -Infinity;
+      if (bv == null) bv = sortDir > 0 ? Infinity : -Infinity;
+      if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+      return (av - bv) * sortDir;
+    });
+  }
+
+  const total = filteredResults.length;
+  const pages = Math.ceil(total / PAGE_SIZE) || 1;
+  currentPage = Math.min(currentPage, pages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const slice = filteredResults.slice(start, start + PAGE_SIZE);
+
+  const tbody = document.getElementById('tableBody');
+  if (total === 0) {
+    tbody.innerHTML = '';
+    document.getElementById('emptyState').style.display = 'block';
+  } else {
+    document.getElementById('emptyState').style.display = 'none';
+    tbody.innerHTML = slice.map(r =>
+      '<tr>' + cols.map(c => `<td>${fmtCell(r, c)}</td>`).join('') + '</tr>'
+    ).join('');
+  }
+
+  document.getElementById('pageInfo').textContent =
+    `${start+1}–${Math.min(start+PAGE_SIZE, total)} of ${total}`;
+  document.getElementById('prevBtn').disabled = currentPage <= 1;
+  document.getElementById('nextBtn').disabled = currentPage >= pages;
+}
+
+function fmtCell(r, col) {
+  const v = r[col.key];
+  switch (col.fmt) {
+    case 'exch': {
+      const isNSE = v === 'NSE';
+      return `<span style="font-size:9px;font-weight:600;color:${isNSE?'#4f9cf9':'#a78bfa'}">${v||'—'}</span>`;
+    }
+    case 'symbol': {
+      const sym = v || r.ticker.replace('.NS','').replace('.BO','');
+      return `<span class="ticker-cell" style="cursor:pointer" onclick="copyTicker('${sym}',this)" title="Click to copy symbol">${sym}</span>`;
+    }
+    case 'company': {
+      const nm = (v||'').length > 28 ? (v||'').slice(0,26)+'…' : (v||'—');
+      return `<span style="color:var(--text);font-size:11px" title="${v||''}">${nm}</span>`;
+    }
+    case 'ticker': {
+      const sym = r.symbol || r.ticker.replace('.NS','').replace('.BO','');
+      return `<span class="ticker-cell" style="cursor:pointer" onclick="copyTicker('${sym}',this)" title="Click to copy">${sym}</span>`;
+    }
+    case 'stage':
+      return `<span class="badge ${v}">${v ?? '—'}</span>`;
+    case 'action':
+      return v ? `<span class="action-badge ${v}">${v}</span>` : '—';
+    case 'spulse': {
+      if (!v) return '—';
+      const cls = v.includes('CONFIRMED') ? 'CONFIRMED' : v.includes('PRESSURE') ? 'PRESSURE' : v.includes('RALLY') ? 'RALLY' : 'DOWNTREND';
+      const short = v === 'CONFIRMED UPTREND' ? 'UPTREND' : v === 'UNDER PRESSURE' ? 'PRESSURE' : v;
+      return `<span class="stock-pulse ${cls}">${short}</span>`;
+    }
+    case 'ddays':
+      if (v == null) return '—';
+      return `<span style="color:${v>=4?COLOR.red:v>=2?COLOR.yellow:COLOR.green}">${v}</span>`;
+    case 'ftday':
+      return v != null ? `<span style="color:${COLOR.green}">Day ${v}</span>` : '—';
+    case 'bool':
+      return v ? `<span style="color:${COLOR.blue}">YES</span>` : `<span style="color:${COLOR.grey}">—</span>`;
+    case 'text':
+      return v ?? '—';
+    case 'num0':
+      return v != null ? Number(v).toLocaleString('en-IN', {maximumFractionDigits:0}) : '—';
+    case 'num2':
+      return v != null ? v.toFixed(2) : '—';
+    case 'num1neg':
+      return v != null ? `<span class="${v>20?'num-neg':v>10?'':'num-pos'}">${v.toFixed(1)}%</span>` : '—';
+    case 'num2pos': // lower is better (spread)
+      return v != null ? `<span class="${v<=2?'num-pos':v<=3.5?'num-neu':'num-neg'}">${v.toFixed(2)}</span>` : '—';
+    case 'num2signed':
+      if (v == null) return '—';
+      return `<span class="${v>0?'num-pos':v<0?'num-neg':'num-neu'}">${v>0?'+':''}${v.toFixed(2)}</span>`;
+    default:
+      return v ?? '—';
+  }
+}
+
+function sortBy(key) {
+  if (sortCol === key) sortDir *= -1;
+  else { sortCol = key; sortDir = 1; }
+  // Update header
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.onclick && th.onclick.toString().includes(`'${key}'`)) {
+      th.classList.add(sortDir > 0 ? 'sort-asc' : 'sort-desc');
+    }
+  });
+  renderTable();
+}
+
+function setFilter(type, val, el) {
+  activeFilters[type] = val;
+  el.closest('.filters').querySelectorAll(`.filter-btn[onclick*="${type}"]`)
+    .forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  currentPage = 1;
+  renderTable();
+}
+
+function resetFilterUI() {
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    if (b.textContent === 'ALL') b.classList.add('active');
+    else b.classList.remove('active');
+  });
+  document.getElementById('searchBox').value = '';
+}
+
+function prevPage() { if (currentPage > 1) { currentPage--; renderTable(); } }
+function nextPage() { currentPage++; renderTable(); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+init();
+checkCache();
+
+function showClearBtn() {
+  if (document.getElementById('clearBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'clearBtn';
+  btn.textContent = '✕ Clear stuck scan';
+  btn.style.cssText = 'background:none;border:1px solid #ef4444;border-radius:3px;color:#ef4444;font-family:var(--mono);font-size:10px;padding:4px 10px;cursor:pointer;margin-top:6px;display:block';
+  btn.onclick = clearStuckScan;
+  document.getElementById('s1Progress').appendChild(btn);
+}
+
+function clearStuckScan() {
+  fetch('/api/scan/clear', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      const cb = document.getElementById('clearBtn');
+      if (cb) cb.remove();
+      if (_pollTimer) clearInterval(_pollTimer);
+      document.getElementById('s1ProgText').textContent = 'Cleared. Click RESCAN to start fresh.';
+      document.getElementById('s1Bar').style.width = '0%';
+      document.getElementById('s1Log').textContent = '';
+      showToast('Stuck scan cleared.');
+    });
+}
+
+function copyTicker(sym, el) {
+  navigator.clipboard.writeText(sym).then(() => {
+    const orig = el.textContent;
+    el.textContent = '✓ copied';
+    el.style.color = 'var(--green)';
+    setTimeout(() => { el.textContent = orig; el.style.color = ''; }, 1200);
+  }).catch(() => {
+    // fallback for non-https
+    const ta = document.createElement('textarea');
+    ta.value = sym;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(`Copied: ${sym}`);
+  });
+}
+</script>
+</body>
+</html>

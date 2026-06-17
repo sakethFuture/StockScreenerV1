@@ -1,0 +1,7 @@
+screener_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.zip
+*.lock
+.env

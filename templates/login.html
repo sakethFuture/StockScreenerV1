@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Pulse — Login</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0c0f;
+    color: #c8cdd8;
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: #10141a;
+    border: 1px solid #1e2535;
+    border-radius: 8px;
+    padding: 40px 36px;
+    width: 340px;
+  }
+  .logo {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #4f9cf9;
+    margin-bottom: 4px;
+  }
+  .logo span { color: #4a5268; font-weight: 300; }
+  .sub {
+    font-size: 10px;
+    color: #4a5268;
+    letter-spacing: 0.08em;
+    margin-bottom: 32px;
+  }
+  label {
+    display: block;
+    font-size: 10px;
+    color: #4a5268;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  input {
+    width: 100%;
+    background: #161b24;
+    border: 1px solid #1e2535;
+    border-radius: 4px;
+    color: #c8cdd8;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: #4f9cf9; }
+  button {
+    width: 100%;
+    background: #4f9cf9;
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    padding: 11px;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  .error {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 4px;
+    color: #ef4444;
+    font-size: 11px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+  }
+  .divider {
+    border: none;
+    border-top: 1px solid #1e2535;
+    margin: 28px 0 24px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">MARKET PULSE <span>/ FCC</span></div>
+  <div class="sub">EQUITY SCREENER · NSE</div>
+  <hr class="divider">
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+  <form method="POST" action="/login">
+    <label>Username</label>
+    <input type="text" name="username" autocomplete="username" autofocus>
+    <label>Password</label>
+    <input type="password" name="password" autocomplete="current-password">
+    <button type="submit">SIGN IN →</button>
+  </form>
+</div>
+</body>
+</html>

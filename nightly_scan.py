@@ -1,0 +1,289 @@
+"""
+Nightly Scanner — run this once daily (e.g. 8 PM after market close)
+Scans full NSE+BSE universe, caches results for all 3 tiers.
+Users get instant load from cache — no waiting in browser.
+
+Schedule:
+  Windows Task Scheduler → python nightly_scan.py
+  Linux/Mac cron        → 0 20 * * 1-5 cd /path/to/pulse_screener && python nightly_scan.py
+"""
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import requests
+import warnings
+import time
+import os
+import json
+import io
+from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+warnings.filterwarnings("ignore")
+
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screener_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+TIER_CONFIG = {
+    "smallcap": {
+        "label": "Small Cap", "mcap_min": 0, "mcap_max": 30000,
+        "spread_max": 5.0, "full_thresh": 3.0, "mid_thresh": 4.0,
+    },
+    "midcap": {
+        "label": "Mid Cap", "mcap_min": 30000, "mcap_max": 50000,
+        "spread_max": 4.5, "full_thresh": 2.5, "mid_thresh": 3.5,
+    },
+    "largecap": {
+        "label": "Large Cap", "mcap_min": 50000, "mcap_max": 10_000_000,
+        "spread_max": 4.0, "full_thresh": 2.0, "mid_thresh": 3.0,
+    },
+}
+
+TIER_MCAP_LABELS = {
+    "smallcap": [(0,1000,"MICRO (0-1K)"),(1000,5000,"SMALL (1-5K)"),(5000,30000,"MID-SMALL (5-30K)")],
+    "midcap":   [(30000,40000,"LOWER MID (30-40K)"),(40000,50000,"UPPER MID (40-50K)")],
+    "largecap": [(50000,200000,"LARGE (50-200K)"),(200000,10_000_000,"MEGA (200K+)")],
+}
+
+def safe_download(ticker, period="1y", interval="1d", timeout=8, **kwargs):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    def _dl():
+        return yf.download(ticker, period=period, interval=interval,
+                           auto_adjust=True, progress=False, **kwargs)
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_dl)
+        try:
+            return fut.result(timeout=timeout)
+        except (FuturesTimeout, Exception):
+            fut.cancel()
+            return None
+
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+# ── Universe ──────────────────────────────────────────────────────────────────
+
+def fetch_nse():
+    try:
+        r = requests.get(
+            "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.nseindia.com/"},
+            timeout=20)
+        r.raise_for_status()
+        df = pd.read_csv(io.BytesIO(r.content))
+        sym_col  = next((c for c in df.columns if "SYMBOL" in c.upper()), None)
+        isin_col = next((c for c in df.columns if "ISIN"   in c.upper()), None)
+        name_col = next((c for c in df.columns if "NAME"   in c.upper()), None)
+        rows = []
+        for _, row in df.iterrows():
+            sym = str(row[sym_col]).strip()
+            if sum(1 for c in sym if c.isalpha()) < 3: continue
+            isin = str(row[isin_col]).strip() if isin_col else ""
+            name = str(row[name_col]).strip() if name_col else sym
+            rows.append((sym + ".NS", isin, sym, name))
+        log(f"NSE: {len(rows)} tickers")
+        return rows
+    except Exception as e:
+        log(f"NSE fetch failed: {e}")
+        return []
+
+def fetch_bse():
+    try:
+        r = requests.get(
+            "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"
+            "?Group=&Scripcode=&industry=&segment=Equity&status=Active",
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.bseindia.com/",
+                     "Origin": "https://www.bseindia.com"},
+            timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("Table", data) if isinstance(data, dict) else data
+        rows = []
+        for item in items:
+            code   = str(item.get("SCRIP_CD",   item.get("scripcode",  ""))).strip()
+            isin   = str(item.get("ISIN_NO",    item.get("isin",       ""))).strip()
+            name   = str(item.get("SCRIP_NAME", item.get("scrip_name", code))).strip()
+            symbol = str(item.get("NSESYMBOL",  item.get("nsesymbol",  ""))).strip()
+            display = symbol if (symbol and symbol not in ("nan","")) else name[:25]
+            if code.isdigit() and len(code) >= 5:
+                rows.append((code + ".BO", isin, display, name))
+        log(f"BSE: {len(rows)} tickers")
+        return rows
+    except Exception as e:
+        log(f"BSE fetch failed: {e}")
+        return []
+
+def build_universe():
+    cache      = os.path.join(CACHE_DIR, "universe_v2.csv")
+    name_cache = os.path.join(CACHE_DIR, "name_map.json")
+    nse_rows   = fetch_nse()
+    bse_rows   = fetch_bse()
+    nse_isins  = {isin for _, isin, _, _ in nse_rows if isin and isin != "nan"}
+    nse_tickers = [t for t, _, _, _ in nse_rows]
+    name_map   = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
+    bse_only   = []
+    for ticker, isin, symbol, name in bse_rows:
+        if isin and isin != "nan" and isin in nse_isins: continue
+        bse_only.append(ticker)
+        name_map[ticker] = {"symbol": symbol, "name": name}
+    combined = nse_tickers + bse_only
+    pd.DataFrame({"ticker": combined}).to_csv(cache, index=False)
+    with open(name_cache, "w") as f:
+        json.dump(name_map, f)
+    log(f"Universe: NSE {len(nse_tickers)} + BSE-only {len(bse_only)} = {len(combined)} total")
+    return combined, name_map
+
+# ── EMA screen ────────────────────────────────────────────────────────────────
+
+def ema(arr, p):
+    return pd.Series(arr.astype(float)).ewm(span=p, adjust=False).mean().values
+
+def extract_close(data, ticker, is_batch):
+    try:
+        if not is_batch or not isinstance(data.columns, pd.MultiIndex):
+            return data["Close"].dropna().values.flatten().astype(float) if "Close" in data.columns else None
+        l0 = list(data.columns.get_level_values(0))
+        l1 = list(data.columns.get_level_values(1))
+        if ticker in l0 and "Close" in l1:
+            return data[ticker]["Close"].dropna().values.flatten().astype(float)
+        if "Close" in l0 and ticker in l1:
+            return data["Close"][ticker].dropna().values.flatten().astype(float)
+        return None
+    except:
+        return None
+
+def check_ema(close, cfg):
+    if len(close) < 210: return None
+    e200 = ema(close, 200)
+    if float(e200[-1]) <= float(e200[-21]): return None   # 200 DMA must be rising
+    ev  = {p: float(ema(close, p)[-1]) for p in [8,13,21,34,55]}
+    ev5 = {p: float(ema(close, p)[-6]) for p in [8,13,21,34,55]}
+    def spread(d):
+        mn = min(d.values())
+        return (max(d.values()) - mn) / mn * 100 if mn > 0 else 999
+    s_now = spread(ev)
+    s_5d  = spread(ev5)
+    if s_now > cfg["spread_max"] or s_now >= s_5d: return None  # must be compressing
+    price  = float(close[-1])
+    stage  = "FULL" if s_now <= cfg["full_thresh"] else ("MID" if s_now <= cfg["mid_thresh"] else "FAST")
+    high52 = float(np.max(close[-252:])) if len(close) >= 252 else float(np.max(close))
+    return {
+        "stage":        stage,
+        "price":        round(price, 2),
+        "spread_8_55":  round(s_now, 2),
+        "spread_5d":    round(s_5d, 2),
+        "ema200_slope": round(float(e200[-1]) - float(e200[-21]), 2),
+        "pct_off_52h":  round((high52 - price) / high52 * 100, 1),
+    }
+
+def get_mcap(ticker):
+    try:
+        fi = yf.Ticker(ticker).fast_info
+        mcap = getattr(fi, "market_cap", None)
+        return round(mcap / 1e7, 0) if mcap else None
+    except:
+        return None
+
+def mcap_tier_label(mcap_cr, tier_key):
+    for lo, hi, label in TIER_MCAP_LABELS.get(tier_key, []):
+        if mcap_cr is not None and lo <= mcap_cr < hi:
+            return label
+    return "UNKNOWN"
+
+# ── Main scan ─────────────────────────────────────────────────────────────────
+
+def run_scan():
+    start = datetime.now()
+    log("=" * 55)
+    log("NIGHTLY SCAN STARTING")
+    log("=" * 55)
+
+    tickers, name_map = build_universe()
+    total   = len(tickers)
+    BATCH   = 100
+
+    # ── Step 1: EMA screen (all tickers, no tier filter yet) ──────────────────
+    log(f"Step 1: EMA + 200 DMA scan across {total} tickers …")
+    ema_hits = []   # list of {ticker, stage, spread, ...}
+    batches  = [tickers[i:i+BATCH] for i in range(0, total, BATCH)]
+
+    for i, batch in enumerate(batches):
+        try:
+            is_b = len(batch) > 1
+            data = safe_download(
+                batch if is_b else batch[0],
+                period="1y", interval="1d", timeout=30,
+                group_by="ticker" if is_b else None, threads=True)
+            if data is not None and not data.empty:
+                for ticker in batch:
+                    c = extract_close(data, ticker, is_b)
+                    if c is None: continue
+                    # Use loosest cfg for initial screen — tier filter happens after MCap
+                    res = check_ema(c, {"spread_max": 5.0, "full_thresh": 3.0, "mid_thresh": 4.0})
+                    if res:
+                        res["ticker"] = ticker
+                        nm = name_map.get(ticker, {})
+                        res["symbol"] = nm.get("symbol", ticker.replace(".NS","").replace(".BO",""))
+                        res["name"]   = nm.get("name", "")
+                        ema_hits.append(res)
+        except Exception as e:
+            pass
+
+        if (i + 1) % 10 == 0:
+            pct = round((i+1)*BATCH/total*100, 1)
+            log(f"  {(i+1)*BATCH}/{total} scanned ({pct}%) — {len(ema_hits)} EMA hits")
+
+    log(f"Step 1 done: {len(ema_hits)} stocks passed EMA + 200 DMA")
+
+    # ── Step 2: Parallel MCap fetch for all EMA hits ───────────────────────────
+    log(f"Step 2: Fetching MCap for {len(ema_hits)} stocks (parallel, 20 workers) …")
+    mcap_map = {}
+    def fetch_mcap(r):
+        return r["ticker"], get_mcap(r["ticker"])
+
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = {ex.submit(fetch_mcap, r): r for r in ema_hits}
+        done = 0
+        for fut in as_completed(futures):
+            ticker, mcap = fut.result()
+            mcap_map[ticker] = mcap
+            done += 1
+            if done % 50 == 0:
+                log(f"  MCap fetched: {done}/{len(ema_hits)}")
+
+    log("Step 2 done.")
+
+    # ── Step 3: Split into tiers and cache ────────────────────────────────────
+    log("Step 3: Bucketing into tiers and writing cache …")
+    today = str(date.today())
+    stage_ord = {"FULL": 0, "MID": 1, "FAST": 2}
+
+    for tier_key, cfg in TIER_CONFIG.items():
+        bucket = []
+        for r in ema_hits:
+            mcap_cr = mcap_map.get(r["ticker"])
+            if mcap_cr is None: continue
+            if mcap_cr < cfg["mcap_min"] or mcap_cr > cfg["mcap_max"]: continue
+            # Re-check spread thresholds for this tier's stricter config
+            if r["spread_8_55"] > cfg["spread_max"]: continue
+            entry = dict(r)
+            entry["mcap_cr"]   = mcap_cr
+            entry["mcap_tier"] = mcap_tier_label(mcap_cr, tier_key)
+            entry["exchange"]  = "BSE" if r["ticker"].endswith(".BO") else "NSE"
+            bucket.append(entry)
+
+        bucket.sort(key=lambda x: (stage_ord.get(x["stage"], 9), x["spread_8_55"]))
+
+        cache_path = os.path.join(CACHE_DIR, f"base_{tier_key}_{today}.json")
+        with open(cache_path, "w") as f:
+            json.dump(bucket, f)
+
+        log(f"  {cfg['label']}: {len(bucket)} stocks → {cache_path}")
+
+    elapsed = (datetime.now() - start).seconds // 60
+    log(f"SCAN COMPLETE in {elapsed} min. Cache ready for {today}.")
+    log("Users will now get instant results from the webapp.")
+
+if __name__ == "__main__":
+    run_scan()
