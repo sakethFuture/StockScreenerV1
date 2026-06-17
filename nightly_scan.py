@@ -258,75 +258,38 @@ def run_scan():
 
     log(f"Step 1 done: {len(ema_hits)} stocks passed EMA + 200 DMA")
 
-    # ── Step 2: Parallel MCap fetch for all EMA hits ───────────────────────────
-    log(f"Step 2: Fetching MCap for {len(ema_hits)} stocks (parallel, 20 workers) …")
-    mcap_map = {}
-
-    def fetch_mcap(r):
-        ticker = r["ticker"]
-        price  = r.get("price", 0)
-        try:
-            from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _TE
-            def _get():
-                info   = yf.Ticker(ticker).info
-                mcap   = info.get("marketCap") or info.get("regularMarketCap")
-                curr   = info.get("currency", "INR") or "INR"
-                shares = info.get("sharesOutstanding")
-                if mcap:
-                    if curr.upper() == "USD": mcap *= 83.5
-                    return round(mcap / 1e7, 0)
-                if shares and price:
-                    mcap = shares * price
-                    if curr.upper() == "USD": mcap *= 83.5
-                    return round(mcap / 1e7, 0)
-                return None
-            with _TPE(max_workers=1) as ex2:
-                fut2 = ex2.submit(_get)
-                try:
-                    return ticker, fut2.result(timeout=8)
-                except (_TE, Exception):
-                    return ticker, None
-        except:
-            return ticker, None
-
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        futures = {ex.submit(fetch_mcap, r): r for r in ema_hits}
-        done = 0
-        for fut in as_completed(futures):
-            ticker, mcap = fut.result()
-            mcap_map[ticker] = mcap
-            done += 1
-            if done % 50 == 0:
-                log(f"  MCap fetched: {done}/{len(ema_hits)}")
-
-    fetched = sum(1 for v in mcap_map.values() if v is not None)
-    log(f"Step 2 done. MCap resolved: {fetched}/{len(ema_hits)}")
+    # ── Step 2: Price-based tier bucketing (no MCap API call — Yahoo blocks on cloud) ──
+    # Price proxy for tier: Small <500, Mid 500-2000, Large 2000+
+    # This avoids Yahoo .info calls which get rate-limited/blocked on cloud servers
+    PRICE_TIERS = {
+        "smallcap": (0,     500),
+        "midcap":   (500,   2000),
+        "largecap": (2000,  9999999),
+    }
+    log(f"Step 2: Bucketing {len(ema_hits)} stocks by price proxy (no MCap API needed) …")
 
     # ── Step 3: Split into tiers and cache ────────────────────────────────────
-    log("Step 3: Bucketing into tiers and writing cache …")
+    log("Step 3: Writing cache …")
     today = str(date.today())
     stage_ord = {"FULL": 0, "MID": 1, "FAST": 2}
 
     for tier_key, cfg in TIER_CONFIG.items():
+        p_min, p_max = PRICE_TIERS[tier_key]
         bucket = []
         for r in ema_hits:
-            mcap_cr = mcap_map.get(r["ticker"])
-            if mcap_cr is None: continue
-            if mcap_cr < cfg["mcap_min"] or mcap_cr > cfg["mcap_max"]: continue
-            # Re-check spread thresholds for this tier's stricter config
+            price = r.get("price", 0)
+            if price < p_min or price >= p_max: continue
             if r["spread_8_55"] > cfg["spread_max"]: continue
             entry = dict(r)
-            entry["mcap_cr"]   = mcap_cr
-            entry["mcap_tier"] = mcap_tier_label(mcap_cr, tier_key)
+            entry["mcap_cr"]   = None   # not available without API
+            entry["mcap_tier"] = f"~{tier_key.upper()}"
             entry["exchange"]  = "BSE" if r["ticker"].endswith(".BO") else "NSE"
             bucket.append(entry)
 
         bucket.sort(key=lambda x: (stage_ord.get(x["stage"], 9), x["spread_8_55"]))
-
         cache_path = os.path.join(CACHE_DIR, f"base_{tier_key}_{today}.json")
         with open(cache_path, "w") as f:
             json.dump(bucket, f)
-
         log(f"  {cfg['label']}: {len(bucket)} stocks → {cache_path}")
 
     elapsed = (datetime.now() - start).seconds // 60
