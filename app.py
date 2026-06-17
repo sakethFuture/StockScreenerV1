@@ -252,50 +252,27 @@ def fetch_bse_tickers_api():
         return []
 
 def get_universe():
-    """
-    Fetch NSE + BSE tickers with names.
-    Dedup by ISIN — keep NSE where dual-listed.
-    Returns (ticker_list, name_map, note_string)
-    """
+    """NSE only — BSE removed (numeric codes unusable, MCap/name data unreliable)."""
     cache      = os.path.join(CACHE_DIR, "universe_v2.csv")
     name_cache = os.path.join(CACHE_DIR, "name_map.json")
 
     if os.path.exists(cache) and os.path.exists(name_cache):
         age = (time.time() - os.path.getmtime(cache)) / 3600
         if age < 12:
-            df       = pd.read_csv(cache)
+            df = pd.read_csv(cache)
             with open(name_cache) as f:
                 name_map = json.load(f)
             return df["ticker"].tolist(), name_map, f"cached ({int(age)}h old, {len(df)} stocks)"
 
-    # Fetch NSE
-    nse_rows  = fetch_nse_tickers()   # (ticker, isin, symbol, name)
-    nse_isins = {isin for _, isin, _, _ in nse_rows if isin and isin != "nan"}
-    nse_tickers = [t for t, _, _, _ in nse_rows]
-    name_map  = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
+    nse_rows    = fetch_nse_tickers()
+    tickers     = [t for t, _, _, _ in nse_rows]
+    name_map    = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
 
-    # Fetch BSE
-    bse_rows = fetch_bse_tickers_api()
-    if not bse_rows:
-        bse_rows = fetch_bse_tickers()
-
-    bse_only = []
-    for ticker, isin, symbol, name in bse_rows:
-        if isin and isin != "nan" and isin in nse_isins:
-            continue
-        bse_only.append(ticker)
-        name_map[ticker] = {"symbol": symbol, "name": name}
-
-    combined = nse_tickers + bse_only
-    if not combined:
-        combined = nse_tickers
-
-    pd.DataFrame({"ticker": combined}).to_csv(cache, index=False)
+    pd.DataFrame({"ticker": tickers}).to_csv(cache, index=False)
     with open(name_cache, "w") as f:
         json.dump(name_map, f)
 
-    note = f"fresh — NSE: {len(nse_tickers)}, BSE-only: {len(bse_only)}, total: {len(combined)}"
-    return combined, name_map, note
+    return tickers, name_map, f"fresh — NSE only: {len(tickers)} stocks"
 
 # ── EMA + 200 DMA ─────────────────────────────────────────────────────────────
 
@@ -579,14 +556,24 @@ def api_screen_base(tier):
 @app.route("/api/screen/pulse/<tier>")
 @login_required
 def api_screen_pulse(tier):
+    """Serve Screen 2 from nightly pre-built pulse cache — instant, no live API calls."""
     if tier not in TIER_CONFIG:
         return jsonify({"error": "Unknown tier"}), 400
 
-    cache_path = os.path.join(CACHE_DIR, f"base_{tier}_{date.today()}.json")
-    if not os.path.exists(cache_path):
-        return jsonify({"error": "Run base screen first."}), 400
+    # Serve from pre-built cache (built by nightly_scan Step 4)
+    pulse_cache = os.path.join(CACHE_DIR, f"pulse_{tier}_{date.today()}.json")
+    if os.path.exists(pulse_cache):
+        with open(pulse_cache) as f:
+            data = json.load(f)
+        data["source"] = "cache"
+        return jsonify(data)
 
-    with open(cache_path) as f:
+    # Fallback: compute live if pulse cache missing
+    base_path = os.path.join(CACHE_DIR, f"base_{tier}_{date.today()}.json")
+    if not os.path.exists(base_path):
+        return jsonify({"error": "Run base screen first (click RESCAN)."}), 400
+
+    with open(base_path) as f:
         base_results = json.load(f)
 
     cfg        = TIER_CONFIG[tier]
@@ -594,7 +581,7 @@ def api_screen_pulse(tier):
     pulse      = pulse_data["pulse"]
 
     enriched = [None] * len(base_results)
-    with ThreadPoolExecutor(max_workers=15) as ex:
+    with ThreadPoolExecutor(max_workers=10) as ex:
         futures = {ex.submit(analyse_stock_pulse, dict(r), cfg, pulse): i
                    for i, r in enumerate(base_results)}
         for fut in as_completed(futures):
@@ -605,13 +592,18 @@ def api_screen_pulse(tier):
     stage_ord  = {"FULL": 0, "MID": 1, "FAST": 2}
     enriched = [e for e in enriched if e is not None]
     enriched.sort(key=lambda x: (
-        action_ord.get(x.get("action", "WATCHLIST"), 9),
-        stage_ord.get(x.get("stage", "FAST"), 9),
+        action_ord.get(x.get("action","WATCHLIST"), 9),
+        stage_ord.get(x.get("stage","FAST"), 9),
         x.get("spread_8_55", 99)
     ))
 
-    return jsonify({"results": enriched, "pulse": pulse_data,
-                    "tier": tier, "date": str(date.today()), "total": len(enriched)})
+    result = {"results": enriched, "pulse": pulse_data,
+              "tier": tier, "date": str(date.today()), "total": len(enriched), "source": "live"}
+
+    with open(pulse_cache, "w") as f:
+        json.dump(result, f)
+
+    return jsonify(result)
 
 @app.route("/api/scan/run", methods=["POST"])
 @login_required

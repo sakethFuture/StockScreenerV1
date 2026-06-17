@@ -117,22 +117,14 @@ def fetch_bse():
 def build_universe():
     cache      = os.path.join(CACHE_DIR, "universe_v2.csv")
     name_cache = os.path.join(CACHE_DIR, "name_map.json")
-    nse_rows   = fetch_nse()
-    bse_rows   = fetch_bse()
-    nse_isins  = {isin for _, isin, _, _ in nse_rows if isin and isin != "nan"}
-    nse_tickers = [t for t, _, _, _ in nse_rows]
+    nse_rows   = fetch_nse()   # NSE only — BSE removed (numeric codes, no MCap data)
+    tickers    = [t for t, _, _, _ in nse_rows]
     name_map   = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
-    bse_only   = []
-    for ticker, isin, symbol, name in bse_rows:
-        if isin and isin != "nan" and isin in nse_isins: continue
-        bse_only.append(ticker)
-        name_map[ticker] = {"symbol": symbol, "name": name}
-    combined = nse_tickers + bse_only
-    pd.DataFrame({"ticker": combined}).to_csv(cache, index=False)
+    pd.DataFrame({"ticker": tickers}).to_csv(cache, index=False)
     with open(name_cache, "w") as f:
         json.dump(name_map, f)
-    log(f"Universe: NSE {len(nse_tickers)} + BSE-only {len(bse_only)} = {len(combined)} total")
-    return combined, name_map
+    log(f"Universe: NSE only — {len(tickers)} tickers")
+    return tickers, name_map
 
 # ── EMA screen ────────────────────────────────────────────────────────────────
 
@@ -291,6 +283,147 @@ def run_scan():
         with open(cache_path, "w") as f:
             json.dump(bucket, f)
         log(f"  {cfg['label']}: {len(bucket)} stocks → {cache_path}")
+
+    # ── Step 4: Pulse analysis per tier (cached so users get instant Screen 2) ──
+    log("Step 4: Computing market pulse + stock-level pulse for each tier …")
+
+    SIGNALS = {
+        "CONFIRMED UPTREND": {"color": "green",  "action": "All setups actionable."},
+        "UNDER PRESSURE":    {"color": "yellow", "action": "Only FULL stage setups. Spread < 2% only."},
+        "RALLY ATTEMPT":     {"color": "blue",   "action": "Build watchlist. Do NOT buy until FTD confirmed."},
+        "DOWNTREND":         {"color": "red",    "action": "Watchlist only. No new buys."},
+    }
+
+    def compute_index_pulse(cfg):
+        for attempt in cfg["index_attempts"]:
+            try:
+                d = safe_download(attempt, period="6mo", interval="1d", timeout=15)
+                if d is None or d.empty: continue
+                close  = (d["Close"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Close"]).dropna().astype(float)
+                volume = (d["Volume"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Volume"]).dropna().astype(float)
+                chg     = close.pct_change() * 100
+                avg_vol = volume.rolling(20).mean()
+                dist_mask  = (chg <= -cfg["dist_down_pct"]) & (volume > avg_vol)
+                dist_count = int(dist_mask.iloc[-cfg["dist_window"]:].sum())
+                c          = close.values
+                low_idx    = len(c) - 15 + int(np.argmin(c[-15:]))
+                days_since = len(c) - 1 - low_idx
+                bounce     = (float(c[-1]) - float(c[low_idx])) / float(c[low_idx]) * 100
+                in_rally   = 1.0 <= bounce and 1 <= days_since <= 12
+                ftd = False; ftd_day = None
+                if in_rally:
+                    for day in range(cfg["ftd_day_min"], min(cfg["ftd_day_max"]+1, days_since+1)):
+                        idx2 = low_idx + day
+                        if idx2 >= len(c): break
+                        if float(chg.iloc[idx2]) >= cfg["ftd_up_pct"] and float(volume.iloc[idx2]) > float(avg_vol.iloc[idx2]):
+                            ftd = True; ftd_day = day; break
+                if dist_count >= cfg["dist_downtrend"]:
+                    pulse = "RALLY ATTEMPT" if in_rally else "DOWNTREND"
+                elif dist_count >= cfg["dist_pressure"]:
+                    pulse = "UNDER PRESSURE"
+                else:
+                    pulse = "CONFIRMED UPTREND"
+                if ftd: pulse = "CONFIRMED UPTREND"
+                return {
+                    "pulse": pulse, "signal": SIGNALS.get(pulse, {}),
+                    "index": attempt, "index_label": cfg["index_label"],
+                    "idx_1d": round(float(chg.iloc[-1]), 2),
+                    "idx_5d": round(float((close.iloc[-1]/close.iloc[-6]-1)*100) if len(close)>=6 else 0, 2),
+                    "dist_count": dist_count, "dist_window": cfg["dist_window"],
+                    "dist_pressure": cfg["dist_pressure"], "dist_downtrend": cfg["dist_downtrend"],
+                    "in_rally": in_rally, "rally_day": days_since if in_rally else None,
+                    "ftd": ftd, "ftd_day": ftd_day,
+                    "ftd_day_min": cfg["ftd_day_min"], "ftd_day_max": cfg["ftd_day_max"],
+                    "date": today,
+                }
+            except Exception as e:
+                log(f"  Index {attempt} failed: {e}")
+        return {"pulse": "CONFIRMED UPTREND", "error": "Index unavailable", "date": today}
+
+    def analyse_one(r, cfg, pulse):
+        ticker = r["ticker"]
+        try:
+            d = safe_download(ticker, period="6mo", interval="1d", timeout=10)
+            if d is None or d.empty:
+                r.update({"dist_days": None, "ft_days": None, "stock_pulse": "NO DATA", "action": "WATCHLIST"})
+                return r
+            close  = (d["Close"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Close"]).dropna().astype(float)
+            volume = (d["Volume"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Volume"]).dropna().astype(float)
+            chg     = close.pct_change() * 100
+            avg_vol = volume.rolling(20).mean()
+            dist_mask  = (chg <= -cfg["dist_down_pct"]) & (volume > avg_vol)
+            dist_count = int(dist_mask.iloc[-cfg["dist_window"]:].sum())
+            c          = close.values
+            low_idx    = len(c) - 15 + int(np.argmin(c[-15:]))
+            days_since = len(c) - 1 - low_idx
+            bounce     = (float(c[-1]) - float(c[low_idx])) / float(c[low_idx]) * 100
+            in_rally   = 1.0 <= bounce and 1 <= days_since <= 12
+            ftd = False; ftd_day = None
+            if in_rally:
+                for day in range(cfg["ftd_day_min"], min(cfg["ftd_day_max"]+1, days_since+1)):
+                    idx2 = low_idx + day
+                    if idx2 >= len(c): break
+                    if float(chg.iloc[idx2]) >= cfg["ftd_up_pct"] and float(volume.iloc[idx2]) > float(avg_vol.iloc[idx2]):
+                        ftd = True; ftd_day = day; break
+            if dist_count >= cfg["dist_downtrend"]:
+                sp = "RALLY ATTEMPT" if in_rally else "DOWNTREND"
+            elif dist_count >= cfg["dist_pressure"]:
+                sp = "UNDER PRESSURE"
+            else:
+                sp = "CONFIRMED UPTREND"
+            if ftd: sp = "CONFIRMED UPTREND"
+            if pulse == "CONFIRMED UPTREND" and sp in ["CONFIRMED UPTREND", "UNDER PRESSURE"]:
+                action = "ACTIONABLE"
+            elif pulse == "UNDER PRESSURE" and sp == "CONFIRMED UPTREND" and r.get("spread_8_55", 99) < 2.0:
+                action = "CAUTION"
+            else:
+                action = "WATCHLIST"
+            r.update({"dist_days": dist_count, "ft_days": ftd_day,
+                      "in_rally": in_rally, "rally_day": days_since if in_rally else None,
+                      "stock_pulse": sp, "ftd_fired": ftd, "action": action})
+        except:
+            r.update({"dist_days": None, "ft_days": None, "stock_pulse": "ERROR", "action": "WATCHLIST"})
+        return r
+
+    for tier_key, cfg in TIER_CONFIG.items():
+        base_path  = os.path.join(CACHE_DIR, f"base_{tier_key}_{today}.json")
+        pulse_path = os.path.join(CACHE_DIR, f"pulse_{tier_key}_{today}.json")
+        if not os.path.exists(base_path):
+            continue
+        with open(base_path) as f:
+            bucket = json.load(f)
+        if not bucket:
+            with open(pulse_path, "w") as f:
+                json.dump({"results": [], "pulse": {}, "tier": tier_key, "date": today}, f)
+            continue
+
+        log(f"  {cfg['label']}: computing index pulse …")
+        pulse_data = compute_index_pulse(cfg)
+        pulse      = pulse_data["pulse"]
+        log(f"  {cfg['label']}: pulse = {pulse}. Analysing {len(bucket)} stocks (10 workers) …")
+
+        enriched = [None] * len(bucket)
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            futures = {ex.submit(analyse_one, dict(r), cfg, pulse): i for i, r in enumerate(bucket)}
+            done = 0
+            for fut in as_completed(futures):
+                i = futures[fut]
+                enriched[i] = fut.result()
+                done += 1
+                if done % 20 == 0:
+                    log(f"    {done}/{len(bucket)} analysed")
+
+        action_ord = {"ACTIONABLE": 0, "CAUTION": 1, "WATCHLIST": 2}
+        stage_ord2 = {"FULL": 0, "MID": 1, "FAST": 2}
+        enriched = [e for e in enriched if e is not None]
+        enriched.sort(key=lambda x: (
+            action_ord.get(x.get("action","WATCHLIST"), 9),
+            stage_ord2.get(x.get("stage","FAST"), 9),
+            x.get("spread_8_55", 99)
+        ))
+        with open(pulse_path, "w") as f:
+            json.dump({"results": enriched, "pulse": pulse_data, "tier": tier_key, "date": today, "total": len(enriched)}, f)
+        log(f"  {cfg['label']}: {len(enriched)} stocks cached → {pulse_path}")
 
     elapsed = (datetime.now() - start).seconds // 60
     log(f"SCAN COMPLETE in {elapsed} min. Cache ready for {today}.")
