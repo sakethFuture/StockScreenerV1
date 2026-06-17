@@ -348,12 +348,16 @@ def check_ema(close, cfg):
 # ── MCap ──────────────────────────────────────────────────────────────────────
 
 def get_mcap(ticker):
+    """Returns MCap in INR Crores. Handles USD→INR conversion if needed."""
+    USD_TO_INR = 83.5
     try:
-        fi = yf.Ticker(ticker).fast_info
+        fi   = yf.Ticker(ticker).fast_info
         mcap = getattr(fi, "market_cap", None)
-        if mcap is None:
+        curr = getattr(fi, "currency", "INR") or "INR"
+        if not mcap:
             return None
-        # Convert to Cr (1 Cr = 10M INR). BSE quotes in INR, NSE in INR.
+        if curr.upper() == "USD":
+            mcap = mcap * USD_TO_INR
         return round(mcap / 1e7, 0)
     except:
         return None

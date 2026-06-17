@@ -178,10 +178,23 @@ def check_ema(close, cfg):
     }
 
 def get_mcap(ticker):
+    """
+    Returns MCap in INR Crores.
+    yfinance fast_info.market_cap is in the stock's native currency.
+    NSE/BSE stocks quote in INR — divide by 1e7 to get Crores.
+    But yfinance sometimes returns USD for Indian stocks — detect and convert.
+    1 USD ~ 83.5 INR (use a safe static rate; close enough for tier bucketing)
+    """
+    USD_TO_INR = 83.5
     try:
-        fi = yf.Ticker(ticker).fast_info
+        fi   = yf.Ticker(ticker).fast_info
         mcap = getattr(fi, "market_cap", None)
-        return round(mcap / 1e7, 0) if mcap else None
+        curr = getattr(fi, "currency", "INR") or "INR"
+        if not mcap:
+            return None
+        if curr.upper() == "USD":
+            mcap = mcap * USD_TO_INR   # convert to INR first
+        return round(mcap / 1e7, 0)    # INR → Crores
     except:
         return None
 
