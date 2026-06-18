@@ -324,27 +324,34 @@ def check_ema(close, cfg):
 
 # ── MCap ──────────────────────────────────────────────────────────────────────
 
-def get_mcap(ticker):
-    """Returns MCap in INR Crores via info dict (fast_info unreliable on cloud)."""
-    USD_TO_INR = 83.5
-    try:
-        info = yf.Ticker(ticker).info
-        mcap = info.get("marketCap") or info.get("regularMarketCap")
-        curr = info.get("currency", "INR") or "INR"
-        if mcap:
+def get_mcap(ticker, price=None):
+    """
+    Fetch MCap via Yahoo chart API — same endpoint yf.download() uses.
+    Avoids quoteSummary which gets crumb/auth blocked on cloud servers.
+    Returns INR Crores or None.
+    """
+    USD_TO_INR = 84.0
+    for host in ["query1", "query2"]:
+        try:
+            url = f"https://{host}.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+            if r.status_code != 200:
+                continue
+            meta = r.json()["chart"]["result"][0]["meta"]
+            mcap = meta.get("marketCap")
+            curr = meta.get("currency", "INR") or "INR"
+            if not mcap and price:
+                shares = meta.get("sharesOutstanding")
+                if shares:
+                    mcap = shares * price
+            if not mcap:
+                return None
             if curr.upper() == "USD":
-                mcap = mcap * USD_TO_INR
+                mcap *= USD_TO_INR
             return round(mcap / 1e7, 0)
-        shares = info.get("sharesOutstanding")
-        price  = info.get("regularMarketPrice") or info.get("currentPrice")
-        if shares and price:
-            mcap = shares * price
-            if curr.upper() == "USD":
-                mcap = mcap * USD_TO_INR
-            return round(mcap / 1e7, 0)
-        return None
-    except:
-        return None
+        except:
+            continue
+    return None
 
 def mcap_tier_label(mcap_cr, tier_key):
     for lo, hi, label in TIER_MCAP_LABELS.get(tier_key, []):

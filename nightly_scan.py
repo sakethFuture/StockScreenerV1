@@ -59,6 +59,37 @@ def safe_download(ticker, period="1y", interval="1d", timeout=8, **kwargs):
             fut.cancel()
             return None
 
+def get_mcap_from_chart(ticker, price=None):
+    """
+    Fetch MCap via Yahoo chart API metadata — same endpoint as yf.download(),
+    not the blocked quoteSummary endpoint. Returns INR Crores or None.
+    """
+    USD_TO_INR = 84.0
+    try:
+        import requests as _req
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
+        r = _req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        if r.status_code != 200:
+            # Try query2
+            url2 = url.replace("query1", "query2")
+            r = _req.get(url2, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        if r.status_code != 200:
+            return None
+        meta = r.json()["chart"]["result"][0]["meta"]
+        mcap = meta.get("marketCap")
+        curr = meta.get("currency", "INR")
+        if not mcap and price:
+            shares = meta.get("sharesOutstanding")
+            if shares:
+                mcap = shares * price
+        if not mcap:
+            return None
+        if curr and curr.upper() == "USD":
+            mcap *= USD_TO_INR
+        return round(mcap / 1e7, 0)
+    except:
+        return None
+
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -250,15 +281,28 @@ def run_scan():
 
     log(f"Step 1 done: {len(ema_hits)} stocks passed EMA + 200 DMA")
 
-    # ── Step 2: Price-based tier bucketing (no MCap API call — Yahoo blocks on cloud) ──
-    # Price proxy for tier: Small <500, Mid 500-2000, Large 2000+
-    # This avoids Yahoo .info calls which get rate-limited/blocked on cloud servers
-    PRICE_TIERS = {
-        "smallcap": (0,     500),
-        "midcap":   (500,   2000),
-        "largecap": (2000,  9999999),
-    }
-    log(f"Step 2: Bucketing {len(ema_hits)} stocks by price proxy (no MCap API needed) …")
+    # ── Step 2: Fetch real MCap via Yahoo chart API (same endpoint as download) ──
+    log(f"Step 2: Fetching MCap for {len(ema_hits)} stocks via chart API (15 workers) …")
+    mcap_map = {}
+
+    def fetch_mcap_chart(r):
+        t = r["ticker"]
+        mcap = get_mcap_from_chart(t, price=r.get("price"))
+        return t, mcap
+
+    with ThreadPoolExecutor(max_workers=15) as ex:
+        futures = {ex.submit(fetch_mcap_chart, r): r for r in ema_hits}
+        done = 0
+        for fut in as_completed(futures):
+            t, mcap = fut.result()
+            mcap_map[t] = mcap
+            done += 1
+            if done % 50 == 0:
+                resolved = sum(1 for v in mcap_map.values() if v)
+                log(f"  {done}/{len(ema_hits)} done, MCap resolved: {resolved}")
+
+    resolved = sum(1 for v in mcap_map.values() if v)
+    log(f"Step 2 done. MCap resolved: {resolved}/{len(ema_hits)}")
 
     # ── Step 3: Split into tiers and cache ────────────────────────────────────
     log("Step 3: Writing cache …")
@@ -266,15 +310,21 @@ def run_scan():
     stage_ord = {"FULL": 0, "MID": 1, "FAST": 2}
 
     for tier_key, cfg in TIER_CONFIG.items():
-        p_min, p_max = PRICE_TIERS[tier_key]
         bucket = []
         for r in ema_hits:
-            price = r.get("price", 0)
-            if price < p_min or price >= p_max: continue
+            mcap_cr = mcap_map.get(r["ticker"])
+            # If MCap unavailable fall back to price proxy
+            if mcap_cr is None:
+                price = r.get("price", 0)
+                PRICE_PROXY = {"smallcap":(0,500),"midcap":(500,2000),"largecap":(2000,9e9)}
+                p_min, p_max = PRICE_PROXY[tier_key]
+                if not (p_min <= price < p_max): continue
+            else:
+                if mcap_cr < cfg["mcap_min"] or mcap_cr > cfg["mcap_max"]: continue
             if r["spread_8_55"] > cfg["spread_max"]: continue
             entry = dict(r)
-            entry["mcap_cr"]   = None   # not available without API
-            entry["mcap_tier"] = f"~{tier_key.upper()}"
+            entry["mcap_cr"]   = mcap_cr
+            entry["mcap_tier"] = mcap_tier_label(mcap_cr, tier_key) if mcap_cr else "~EST"
             entry["exchange"]  = "BSE" if r["ticker"].endswith(".BO") else "NSE"
             bucket.append(entry)
 
