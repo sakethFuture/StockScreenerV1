@@ -449,7 +449,8 @@ def analyse_stock_pulse(r, cfg, pulse):
     try:
         d = safe_download(ticker, period="6mo", interval="1d", timeout=8)
         if d is None or d.empty:
-            r.update({"dist_days": None, "ft_days": None, "stock_pulse": "NO DATA", "action": "WATCHLIST"})
+            r.update({"dist_days": None, "acc_days": None, "ft_days": None,
+                      "stock_pulse": "NO DATA", "action": "WATCHLIST"})
             return r
         if isinstance(d.columns, pd.MultiIndex):
             close  = d["Close"].iloc[:, 0].dropna().astype(float)
@@ -460,24 +461,46 @@ def analyse_stock_pulse(r, cfg, pulse):
 
         chg     = close.pct_change() * 100
         avg_vol = volume.rolling(20).mean()
+
+        # Distribution days
         dist_mask  = (chg <= -cfg["dist_down_pct"]) & (volume > avg_vol)
         dist_count = int(dist_mask.iloc[-cfg["dist_window"]:].sum())
+        dist_dates = [str(dt.date()) for dt in dist_mask[dist_mask].iloc[-5:].index]
+        last_dist  = dist_dates[-1] if dist_dates else None
+        today_dist = bool(dist_mask.iloc[-1])
 
+        # Accumulation days
+        acc_mask  = (chg >= 1.5) & (volume > avg_vol)
+        acc_count = int(acc_mask.iloc[-cfg["dist_window"]:].sum())
+        acc_dates = [str(dt.date()) for dt in acc_mask[acc_mask].iloc[-5:].index]
+        last_acc  = acc_dates[-1] if acc_dates else None
+        today_acc = bool(acc_mask.iloc[-1])
+
+        # DA signal
+        if dist_count == 0 and acc_count == 0:   da_signal = "QUIET"
+        elif acc_count > dist_count * 1.5:       da_signal = "ACCUMULATING"
+        elif dist_count > acc_count * 1.5:       da_signal = "DISTRIBUTING"
+        elif dist_count >= 2 and acc_count >= 2: da_signal = "CHURNING"
+        else:                                    da_signal = "MIXED"
+
+        # Rally + FTD
         c          = close.values
         low_idx    = len(c) - 15 + int(np.argmin(c[-15:]))
         low_price  = float(c[low_idx])
         days_since = len(c) - 1 - low_idx
         bounce     = (float(c[-1]) - low_price) / low_price * 100
         in_rally   = 1.0 <= bounce and 1 <= days_since <= 12
+        rally_start = str(close.index[low_idx].date()) if in_rally else None
 
-        ftd = False; ftd_day = None
+        ftd = False; ftd_day = None; ftd_date = None
         if in_rally:
             for day in range(cfg["ftd_day_min"], min(cfg["ftd_day_max"]+1, days_since+1)):
                 idx = low_idx + day
                 if idx >= len(c): break
                 if (float(chg.iloc[idx]) >= cfg["ftd_up_pct"] and
                         float(volume.iloc[idx]) > float(avg_vol.iloc[idx])):
-                    ftd = True; ftd_day = day; break
+                    ftd = True; ftd_day = day
+                    ftd_date = str(close.index[idx].date()); break
 
         if dist_count >= cfg["dist_downtrend"]:
             sp = "RALLY ATTEMPT" if in_rally else "DOWNTREND"
@@ -485,8 +508,7 @@ def analyse_stock_pulse(r, cfg, pulse):
             sp = "UNDER PRESSURE"
         else:
             sp = "CONFIRMED UPTREND"
-        if ftd:
-            sp = "CONFIRMED UPTREND"
+        if ftd: sp = "CONFIRMED UPTREND"
 
         if pulse == "CONFIRMED UPTREND" and sp in ["CONFIRMED UPTREND", "UNDER PRESSURE"]:
             action = "ACTIONABLE"
@@ -497,15 +519,24 @@ def analyse_stock_pulse(r, cfg, pulse):
 
         r.update({
             "dist_days":   dist_count,
+            "acc_days":    acc_count,
+            "da_signal":   da_signal,
+            "last_dist":   last_dist,
+            "last_acc":    last_acc,
+            "today_dist":  today_dist,
+            "today_acc":   today_acc,
             "ft_days":     ftd_day,
+            "ftd_date":    ftd_date,
             "in_rally":    in_rally,
             "rally_day":   days_since if in_rally else None,
+            "rally_start": rally_start,
             "stock_pulse": sp,
             "ftd_fired":   ftd,
             "action":      action,
         })
     except:
-        r.update({"dist_days": None, "ft_days": None, "stock_pulse": "ERROR", "action": "WATCHLIST"})
+        r.update({"dist_days": None, "acc_days": None, "ft_days": None,
+                  "stock_pulse": "ERROR", "action": "WATCHLIST"})
     return r
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -611,6 +642,141 @@ def api_screen_pulse(tier):
         json.dump(result, f)
 
     return jsonify(result)
+
+@app.route("/api/stock/<ticker>")
+@login_required
+def api_stock(ticker):
+    """Single stock full analysis — EMA + 200 DMA + pulse. Independent of screens."""
+    ticker = ticker.upper().strip()
+    if not ticker.endswith(".NS"):
+        ticker_ns = ticker + ".NS"
+    else:
+        ticker_ns = ticker
+
+    # Download 1 year for EMA
+    d1y = safe_download(ticker_ns, period="1y", interval="1d", timeout=12)
+    if d1y is None or d1y.empty:
+        return jsonify({"error": f"No data for {ticker_ns}"}), 404
+
+    close_1y = (d1y["Close"].iloc[:,0] if isinstance(d1y.columns, pd.MultiIndex) else d1y["Close"]).dropna().astype(float)
+
+    # EMA analysis
+    ema_result = None
+    if len(close_1y) >= 210:
+        # Use loosest cfg for single stock
+        cfg_loose = {"spread_max": 99, "full_thresh": 3.0, "mid_thresh": 4.0}
+        res = check_ema(close_1y.values, cfg_loose)
+        if res:
+            ema_result = res
+
+    # 200 DMA
+    e200 = float(pd.Series(close_1y.values.astype(float)).ewm(span=200, adjust=False).mean().iloc[-1])
+    e200_21 = float(pd.Series(close_1y.values.astype(float)).ewm(span=200, adjust=False).mean().iloc[-21])
+    dma200_rising = e200 > e200_21
+
+    # Download 6mo for pulse
+    d6m = safe_download(ticker_ns, period="6mo", interval="1d", timeout=12)
+    if d6m is None or d6m.empty:
+        return jsonify({"error": f"No pulse data for {ticker_ns}"}), 404
+
+    close_6m = (d6m["Close"].iloc[:,0] if isinstance(d6m.columns, pd.MultiIndex) else d6m["Close"]).dropna().astype(float)
+    volume_6m = (d6m["Volume"].iloc[:,0] if isinstance(d6m.columns, pd.MultiIndex) else d6m["Volume"]).dropna().astype(float)
+
+    chg     = close_6m.pct_change() * 100
+    avg_vol = volume_6m.rolling(20).mean()
+
+    # Distribution days
+    dist_mask  = (chg <= -1.5) & (volume_6m > avg_vol)
+    rec_dist   = dist_mask.iloc[-25:]
+    dist_count = int(rec_dist.sum())
+    dist_dates = [str(d.date()) for d in rec_dist[rec_dist].index]
+    last_dist  = dist_dates[-1] if dist_dates else None
+    today_dist = bool(dist_mask.iloc[-1])
+
+    # Accumulation days
+    acc_mask  = (chg >= 1.5) & (volume_6m > avg_vol)
+    rec_acc   = acc_mask.iloc[-25:]
+    acc_count = int(rec_acc.sum())
+    acc_dates = [str(d.date()) for d in rec_acc[rec_acc].index]
+    last_acc  = acc_dates[-1] if acc_dates else None
+    today_acc = bool(acc_mask.iloc[-1])
+
+    # DA signal
+    if dist_count == 0 and acc_count == 0:   da_signal = "QUIET"
+    elif acc_count > dist_count * 1.5:       da_signal = "ACCUMULATING"
+    elif dist_count > acc_count * 1.5:       da_signal = "DISTRIBUTING"
+    elif dist_count >= 2 and acc_count >= 2: da_signal = "CHURNING"
+    else:                                    da_signal = "MIXED"
+
+    # Rally + FTD
+    c = close_6m.values
+    low_idx    = len(c) - 15 + int(np.argmin(c[-15:]))
+    low_price  = float(c[low_idx])
+    days_since = len(c) - 1 - low_idx
+    bounce     = (float(c[-1]) - low_price) / low_price * 100
+    in_rally   = 1.0 <= bounce <= 50 and 1 <= days_since <= 12
+    rally_start = str(close_6m.index[low_idx].date()) if in_rally else None
+
+    ftd = False; ftd_day = None; ftd_date = None
+    if in_rally:
+        for day in range(4, min(11, days_since + 1)):
+            idx2 = low_idx + day
+            if idx2 >= len(c): break
+            if float(chg.iloc[idx2]) >= 3.0 and float(volume_6m.iloc[idx2]) > float(avg_vol.iloc[idx2]):
+                ftd = True; ftd_day = day
+                ftd_date = str(close_6m.index[idx2].date())
+                break
+
+    # Pulse state
+    if dist_count >= 5:   pulse = "RALLY ATTEMPT" if in_rally else "DOWNTREND"
+    elif dist_count >= 3: pulse = "UNDER PRESSURE"
+    else:                 pulse = "CONFIRMED UPTREND"
+    if ftd: pulse = "CONFIRMED UPTREND"
+
+    price   = float(c[-1])
+    high52  = float(np.max(close_1y.values[-252:])) if len(close_1y) >= 252 else float(np.max(close_1y.values))
+    chg_1d  = round(float(chg.iloc[-1]), 2)
+    chg_5d  = round((float(c[-1])/float(c[-6])-1)*100, 2) if len(c) >= 6 else None
+
+    # Name lookup
+    nm = {}
+    name_cache = os.path.join(CACHE_DIR, "name_map.json")
+    if os.path.exists(name_cache):
+        with open(name_cache) as f:
+            nm = json.load(f).get(ticker_ns, {})
+
+    return jsonify({
+        "ticker":        ticker_ns,
+        "symbol":        nm.get("symbol", ticker),
+        "name":          nm.get("name", ""),
+        "price":         round(price, 2),
+        "chg_1d":        chg_1d,
+        "chg_5d":        chg_5d,
+        "off_52h":       round((high52 - price) / high52 * 100, 1),
+        "dma200":        round(e200, 2),
+        "dma200_rising": dma200_rising,
+        "ema_stage":     ema_result.get("stage") if ema_result else None,
+        "spread_8_55":   ema_result.get("spread_8_55") if ema_result else None,
+        "spread_5d":     ema_result.get("spread_5d") if ema_result else None,
+        "ema200_slope":  ema_result.get("ema200_slope") if ema_result else None,
+        "ema_compression": ema_result is not None,
+        "pulse":         pulse,
+        "da_signal":     da_signal,
+        "dist_count":    dist_count,
+        "acc_count":     acc_count,
+        "dist_dates":    dist_dates,
+        "last_dist":     last_dist,
+        "acc_dates":     acc_dates,
+        "last_acc":      last_acc,
+        "today_dist":    today_dist,
+        "today_acc":     today_acc,
+        "in_rally":      in_rally,
+        "rally_day":     days_since if in_rally else None,
+        "rally_start":   rally_start,
+        "ftd":           ftd,
+        "ftd_day":       ftd_day,
+        "ftd_date":      ftd_date,
+    })
 
 @app.route("/api/scan/run", methods=["POST"])
 @login_required

@@ -482,11 +482,16 @@
 
 <div class="container">
 
-  <!-- Tier selector -->
-  <div class="tier-bar" role="group">
-    <button class="tier-btn active" data-tier="smallcap" onclick="setTier('smallcap')">SMALL CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">0 – 30,000 Cr</span></button>
-    <button class="tier-btn" data-tier="midcap" onclick="setTier('midcap')">MID CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">30,000 – 50,000 Cr</span></button>
-    <button class="tier-btn" data-tier="largecap" onclick="setTier('largecap')">LARGE CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">50,000 Cr+</span></button>
+  <!-- Nav tabs -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <div class="tier-bar" role="group" style="margin-bottom:0">
+      <button class="tier-btn active" data-tier="smallcap" onclick="setTier('smallcap');showTab('screener')">SMALL CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">0 – 30,000 Cr</span></button>
+      <button class="tier-btn" data-tier="midcap" onclick="setTier('midcap');showTab('screener')">MID CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">30,000 – 50,000 Cr</span></button>
+      <button class="tier-btn" data-tier="largecap" onclick="setTier('largecap');showTab('screener')">LARGE CAP<br><span style="font-size:9px;font-weight:300;opacity:0.6">50,000 Cr+</span></button>
+    </div>
+    <button class="tier-btn" id="lookupTabBtn" onclick="showTab('lookup')" style="padding:10px 20px;font-size:11px">
+      🔍 STOCK LOOKUP
+    </button>
   </div>
 
   <!-- Pulse -->
@@ -548,6 +553,82 @@
   </div>
 
   <!-- Results -->
+  <!-- Stock Lookup Tab -->
+  <div id="lookupTab" style="display:none">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:20px 24px;margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.08em;margin-bottom:14px;color:var(--text)">SINGLE STOCK ANALYSIS</div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <input id="stockInput" class="search-box" style="width:200px;font-size:13px;padding:8px 12px"
+          placeholder="e.g. RELIANCE or INFY"
+          onkeydown="if(event.key==='Enter')lookupStock()">
+        <button class="run-btn" onclick="lookupStock()" style="padding:9px 20px">ANALYSE</button>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">.NS added automatically</span>
+      </div>
+    </div>
+
+    <div id="stockResult" style="display:none">
+      <!-- EMA Card -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px" id="stockCards">
+
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:18px 20px">
+          <div class="section-label" style="margin-bottom:12px">EMA + 200 DMA</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px">
+            <div id="emaStageEl" class="badge" style="font-size:11px;padding:3px 10px">—</div>
+            <div id="ema200El" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div class="pulse-stat"><div class="k">SPREAD 8-55</div><div class="v" id="sSpread">—</div></div>
+            <div class="pulse-stat"><div class="k">SPREAD 5D</div><div class="v" id="sSpread5d">—</div></div>
+            <div class="pulse-stat"><div class="k">200 DMA SLOPE</div><div class="v" id="sSlope">—</div></div>
+            <div class="pulse-stat"><div class="k">PRICE</div><div class="v" id="sPrice">—</div></div>
+            <div class="pulse-stat"><div class="k">1D CHG</div><div class="v" id="s1d">—</div></div>
+            <div class="pulse-stat"><div class="k">% OFF 52H</div><div class="v" id="s52h">—</div></div>
+          </div>
+        </div>
+
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:18px 20px">
+          <div class="section-label" style="margin-bottom:12px">PULSE ANALYSIS</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+            <div class="pulse-dot grey" id="sPulseDot"></div>
+            <div id="sPulseLabel" style="font-family:var(--mono);font-size:12px;font-weight:600">—</div>
+            <div id="sDASignal" style="margin-left:auto;font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid var(--border)">—</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div class="pulse-stat"><div class="k">D-DAYS</div><div class="v" id="sDist">—</div></div>
+            <div class="pulse-stat"><div class="k">ACC-DAYS</div><div class="v" id="sAcc">—</div></div>
+            <div class="pulse-stat"><div class="k">TODAY</div><div class="v" id="sToday">—</div></div>
+            <div class="pulse-stat"><div class="k">LAST DIST</div><div class="v" id="sLastDist">—</div></div>
+            <div class="pulse-stat"><div class="k">LAST ACC</div><div class="v" id="sLastAcc">—</div></div>
+            <div class="pulse-stat"><div class="k">FTD</div><div class="v" id="sFtd">—</div></div>
+            <div class="pulse-stat"><div class="k">RALLY DAY</div><div class="v" id="sRally">—</div></div>
+            <div class="pulse-stat"><div class="k">RALLY START</div><div class="v" id="sRallyStart">—</div></div>
+            <div class="pulse-stat"><div class="k">FTD DATE</div><div class="v" id="sFtdDate">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dist/Acc date timeline -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px 20px">
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div>
+            <div class="section-label" style="margin-bottom:6px">DIST DATES (last 5)</div>
+            <div id="sDistDates" style="font-family:var(--mono);font-size:11px;color:var(--red)">—</div>
+          </div>
+          <div>
+            <div class="section-label" style="margin-bottom:6px">ACC DATES (last 5)</div>
+            <div id="sAccDates" style="font-family:var(--mono);font-size:11px;color:var(--green)">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="stockLoading" style="display:none;font-family:var(--mono);font-size:11px;color:var(--muted);padding:20px">
+      Fetching data…
+    </div>
+    <div id="stockError" style="display:none;font-family:var(--mono);font-size:11px;color:var(--red);padding:20px"></div>
+  </div>
+
+  <div id="screenerTab">
   <div id="resultsSection" style="display:none">
     <div class="results-section">
       <div class="results-header">
@@ -584,6 +665,7 @@
     </div>
   </div>
 
+  </div> <!-- end screenerTab -->
 </div>
 
 <div class="toast hidden" id="toast"></div>
@@ -1000,6 +1082,18 @@ function fmtCell(r, col) {
       return v != null ? v.toFixed(2) : '—';
     case 'num1neg':
       return v != null ? `<span class="${v>20?'num-neg':v>10?'':'num-pos'}">${v.toFixed(1)}%</span>` : '—';
+    case 'dasig': {
+      if (!v) return '—';
+      const dc = v==='ACCUMULATING'?'#22c55e':v==='DISTRIBUTING'?'#ef4444':v==='CHURNING'?'#eab308':v==='MIXED'?'#60a5fa':'#4a5268';
+      return `<span style="font-size:9px;font-weight:600;color:${dc};border:1px solid ${dc};padding:1px 6px;border-radius:2px">${v}</span>`;
+    }
+    case 'adays':
+      if (v == null) return '—';
+      return `<span style="color:${v>=4?'#22c55e':v>=2?'#eab308':'#4a5268'}">${v}</span>`;
+    case 'date':
+      return v ? `<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${v}</span>` : '—';
+    case 'ralday':
+      return v != null ? `<span style="color:var(--blue)">Day ${v}</span>` : '—';
     case 'num2pos': // lower is better (spread)
       return v != null ? `<span class="${v<=2?'num-pos':v<=3.5?'num-neu':'num-neg'}">${v.toFixed(2)}</span>` : '—';
     case 'num2signed':
@@ -1053,6 +1147,113 @@ function showToast(msg) {
 
 init();
 checkCache();
+
+function showTab(tab) {
+  const isLookup = tab === 'lookup';
+  document.getElementById('screenerTab').style.display = isLookup ? 'none' : 'block';
+  document.getElementById('lookupTab').style.display   = isLookup ? 'block' : 'none';
+  document.getElementById('lookupTabBtn').classList.toggle('active', isLookup);
+  // pulse section only relevant in screener
+  document.querySelector('.pulse-section').style.display = isLookup ? 'none' : 'block';
+  document.querySelector('.screens').style.display       = isLookup ? 'none' : 'block';
+}
+
+const PULSE_COLORS_MAP = {
+  'CONFIRMED UPTREND': ['green','#22c55e'],
+  'UNDER PRESSURE':    ['yellow','#eab308'],
+  'RALLY ATTEMPT':     ['blue','#60a5fa'],
+  'DOWNTREND':         ['red','#ef4444'],
+};
+const DA_COLORS = {
+  ACCUMULATING:'#22c55e', DISTRIBUTING:'#ef4444',
+  CHURNING:'#eab308', MIXED:'#60a5fa', QUIET:'#4a5268'
+};
+
+function lookupStock() {
+  const raw = document.getElementById('stockInput').value.trim().toUpperCase().replace('.NS','');
+  if (!raw) return;
+  document.getElementById('stockResult').style.display  = 'none';
+  document.getElementById('stockError').style.display   = 'none';
+  document.getElementById('stockLoading').style.display = 'block';
+
+  fetch(`/api/stock/${raw}`)
+    .then(async r => {
+      const d = await r.json();
+      document.getElementById('stockLoading').style.display = 'none';
+      if (d.error) {
+        document.getElementById('stockError').textContent = d.error;
+        document.getElementById('stockError').style.display = 'block';
+        return;
+      }
+      renderStockResult(d);
+    })
+    .catch(e => {
+      document.getElementById('stockLoading').style.display = 'none';
+      document.getElementById('stockError').textContent = 'Error: ' + e.message;
+      document.getElementById('stockError').style.display = 'block';
+    });
+}
+
+function renderStockResult(d) {
+  // Header
+  document.title = `${d.symbol} — Market Pulse`;
+
+  // EMA card
+  const stage = d.ema_stage;
+  const stageEl = document.getElementById('emaStageEl');
+  stageEl.textContent = stage || 'NO COMPRESSION';
+  stageEl.className = 'badge ' + (stage || '');
+  stageEl.style.fontSize = '11px'; stageEl.style.padding = '3px 10px';
+
+  const dmaColor = d.dma200_rising ? '#22c55e' : '#ef4444';
+  document.getElementById('ema200El').innerHTML =
+    `200 DMA: <span style="color:${dmaColor}">${d.dma200_rising ? '↑ RISING' : '↓ FALLING'}</span>`;
+
+  document.getElementById('sSpread').textContent    = d.spread_8_55 != null ? d.spread_8_55.toFixed(2) : '—';
+  document.getElementById('sSpread5d').textContent  = d.spread_5d   != null ? d.spread_5d.toFixed(2)   : '—';
+  document.getElementById('sSlope').textContent     = d.ema200_slope != null ? (d.ema200_slope > 0 ? '+' : '') + d.ema200_slope.toFixed(2) : '—';
+  document.getElementById('sPrice').textContent     = d.price != null ? '₹' + d.price.toFixed(2) : '—';
+  const c1d = d.chg_1d || 0;
+  document.getElementById('s1d').innerHTML = `<span style="color:${c1d>=0?'#22c55e':'#ef4444'}">${c1d>=0?'+':''}${c1d.toFixed(2)}%</span>`;
+  document.getElementById('s52h').textContent = d.off_52h != null ? d.off_52h.toFixed(1) + '%' : '—';
+
+  // Pulse card
+  const [cls, col] = PULSE_COLORS_MAP[d.pulse] || ['grey','#4a5268'];
+  document.getElementById('sPulseDot').className = `pulse-dot ${cls}`;
+  document.getElementById('sPulseLabel').textContent = d.pulse;
+  document.getElementById('sPulseLabel').style.color = col;
+
+  const daEl = document.getElementById('sDASignal');
+  daEl.textContent = d.da_signal || '—';
+  daEl.style.color = DA_COLORS[d.da_signal] || '#4a5268';
+  daEl.style.borderColor = DA_COLORS[d.da_signal] || '#4a5268';
+
+  const ddEl = document.getElementById('sDist');
+  ddEl.textContent = d.dist_count != null ? d.dist_count + (d.today_dist ? '!' : '') : '—';
+  ddEl.style.color = d.dist_count >= 4 ? '#ef4444' : d.dist_count >= 2 ? '#eab308' : '#22c55e';
+
+  const acEl = document.getElementById('sAcc');
+  acEl.textContent = d.acc_count != null ? d.acc_count + (d.today_acc ? '!' : '') : '—';
+  acEl.style.color = d.acc_count >= 4 ? '#22c55e' : '#c8cdd8';
+
+  const todayParts = [];
+  if (d.today_dist) todayParts.push('<span style="color:#ef4444">DIST</span>');
+  if (d.today_acc)  todayParts.push('<span style="color:#22c55e">ACC</span>');
+  document.getElementById('sToday').innerHTML = todayParts.length ? todayParts.join(' + ') : '—';
+
+  document.getElementById('sLastDist').textContent    = d.last_dist    || '—';
+  document.getElementById('sLastAcc').textContent     = d.last_acc     || '—';
+  document.getElementById('sRally').textContent       = d.in_rally ? `Day ${d.rally_day}` : '—';
+  document.getElementById('sRallyStart').textContent  = d.rally_start  || '—';
+  document.getElementById('sFtd').textContent         = d.ftd ? `✓ Day ${d.ftd_day}` : '—';
+  document.getElementById('sFtd').style.color         = d.ftd ? '#22c55e' : '#4a5268';
+  document.getElementById('sFtdDate').textContent     = d.ftd_date     || '—';
+
+  document.getElementById('sDistDates').textContent   = d.dist_dates?.join('  ·  ') || '—';
+  document.getElementById('sAccDates').textContent    = d.acc_dates?.join('  ·  ')  || '—';
+
+  document.getElementById('stockResult').style.display = 'block';
+}
 
 function showClearBtn() {
   if (document.getElementById('clearBtn')) return;

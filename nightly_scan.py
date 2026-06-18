@@ -395,26 +395,51 @@ def run_scan():
         try:
             d = safe_download(ticker, period="6mo", interval="1d", timeout=10)
             if d is None or d.empty:
-                r.update({"dist_days": None, "ft_days": None, "stock_pulse": "NO DATA", "action": "WATCHLIST"})
+                r.update({"dist_days": None, "acc_days": None, "ft_days": None,
+                          "stock_pulse": "NO DATA", "action": "WATCHLIST"})
                 return r
             close  = (d["Close"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Close"]).dropna().astype(float)
             volume = (d["Volume"].iloc[:,0] if isinstance(d.columns, pd.MultiIndex) else d["Volume"]).dropna().astype(float)
             chg     = close.pct_change() * 100
             avg_vol = volume.rolling(20).mean()
+
+            # Distribution days
             dist_mask  = (chg <= -cfg["dist_down_pct"]) & (volume > avg_vol)
             dist_count = int(dist_mask.iloc[-cfg["dist_window"]:].sum())
+            dist_dates = [str(dt.date()) for dt in dist_mask[dist_mask].iloc[-5:].index]
+            last_dist  = dist_dates[-1] if dist_dates else None
+            today_dist = bool(dist_mask.iloc[-1])
+
+            # Accumulation days
+            acc_mask  = (chg >= 1.5) & (volume > avg_vol)
+            acc_count = int(acc_mask.iloc[-cfg["dist_window"]:].sum())
+            acc_dates = [str(dt.date()) for dt in acc_mask[acc_mask].iloc[-5:].index]
+            last_acc  = acc_dates[-1] if acc_dates else None
+            today_acc = bool(acc_mask.iloc[-1])
+
+            # DA signal
+            if dist_count == 0 and acc_count == 0:   da_signal = "QUIET"
+            elif acc_count > dist_count * 1.5:       da_signal = "ACCUMULATING"
+            elif dist_count > acc_count * 1.5:       da_signal = "DISTRIBUTING"
+            elif dist_count >= 2 and acc_count >= 2: da_signal = "CHURNING"
+            else:                                    da_signal = "MIXED"
+
             c          = close.values
             low_idx    = len(c) - 15 + int(np.argmin(c[-15:]))
             days_since = len(c) - 1 - low_idx
             bounce     = (float(c[-1]) - float(c[low_idx])) / float(c[low_idx]) * 100
             in_rally   = 1.0 <= bounce and 1 <= days_since <= 12
-            ftd = False; ftd_day = None
+            rally_start = str(close.index[low_idx].date()) if in_rally else None
+
+            ftd = False; ftd_day = None; ftd_date = None
             if in_rally:
                 for day in range(cfg["ftd_day_min"], min(cfg["ftd_day_max"]+1, days_since+1)):
                     idx2 = low_idx + day
                     if idx2 >= len(c): break
                     if float(chg.iloc[idx2]) >= cfg["ftd_up_pct"] and float(volume.iloc[idx2]) > float(avg_vol.iloc[idx2]):
-                        ftd = True; ftd_day = day; break
+                        ftd = True; ftd_day = day
+                        ftd_date = str(close.index[idx2].date()); break
+
             if dist_count >= cfg["dist_downtrend"]:
                 sp = "RALLY ATTEMPT" if in_rally else "DOWNTREND"
             elif dist_count >= cfg["dist_pressure"]:
@@ -422,17 +447,34 @@ def run_scan():
             else:
                 sp = "CONFIRMED UPTREND"
             if ftd: sp = "CONFIRMED UPTREND"
+
             if pulse == "CONFIRMED UPTREND" and sp in ["CONFIRMED UPTREND", "UNDER PRESSURE"]:
                 action = "ACTIONABLE"
             elif pulse == "UNDER PRESSURE" and sp == "CONFIRMED UPTREND" and r.get("spread_8_55", 99) < 2.0:
                 action = "CAUTION"
             else:
                 action = "WATCHLIST"
-            r.update({"dist_days": dist_count, "ft_days": ftd_day,
-                      "in_rally": in_rally, "rally_day": days_since if in_rally else None,
-                      "stock_pulse": sp, "ftd_fired": ftd, "action": action})
+
+            r.update({
+                "dist_days":   dist_count,
+                "acc_days":    acc_count,
+                "da_signal":   da_signal,
+                "last_dist":   last_dist,
+                "last_acc":    last_acc,
+                "today_dist":  today_dist,
+                "today_acc":   today_acc,
+                "ft_days":     ftd_day,
+                "ftd_date":    ftd_date,
+                "in_rally":    in_rally,
+                "rally_day":   days_since if in_rally else None,
+                "rally_start": rally_start,
+                "stock_pulse": sp,
+                "ftd_fired":   ftd,
+                "action":      action,
+            })
         except:
-            r.update({"dist_days": None, "ft_days": None, "stock_pulse": "ERROR", "action": "WATCHLIST"})
+            r.update({"dist_days": None, "acc_days": None, "ft_days": None,
+                      "stock_pulse": "ERROR", "action": "WATCHLIST"})
         return r
 
     for tier_key, cfg in TIER_CONFIG.items():
