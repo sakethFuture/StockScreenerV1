@@ -252,27 +252,31 @@ def fetch_bse_tickers_api():
         return []
 
 def get_universe():
-    """NSE only — BSE removed (numeric codes unusable, MCap/name data unreliable)."""
+    """
+    NSE only. Universe refreshed every scan run — no stale cache.
+    Falls back to cached version only if live fetch fails.
+    """
     cache      = os.path.join(CACHE_DIR, "universe_v2.csv")
     name_cache = os.path.join(CACHE_DIR, "name_map.json")
 
+    nse_rows = fetch_nse_tickers()
+    if nse_rows:
+        tickers  = [t for t, _, _, _ in nse_rows]
+        name_map = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
+        pd.DataFrame({"ticker": tickers}).to_csv(cache, index=False)
+        with open(name_cache, "w") as f:
+            json.dump(name_map, f)
+        return tickers, name_map, f"fresh — {len(tickers)} NSE stocks"
+
+    # Fallback: use last known universe
     if os.path.exists(cache) and os.path.exists(name_cache):
-        age = (time.time() - os.path.getmtime(cache)) / 3600
-        if age < 12:
-            df = pd.read_csv(cache)
-            with open(name_cache) as f:
-                name_map = json.load(f)
-            return df["ticker"].tolist(), name_map, f"cached ({int(age)}h old, {len(df)} stocks)"
+        df = pd.read_csv(cache)
+        with open(name_cache) as f:
+            name_map = json.load(f)
+        age_h = int((time.time() - os.path.getmtime(cache)) / 3600)
+        return df["ticker"].tolist(), name_map, f"fallback cache ({age_h}h old)"
 
-    nse_rows    = fetch_nse_tickers()
-    tickers     = [t for t, _, _, _ in nse_rows]
-    name_map    = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
-
-    pd.DataFrame({"ticker": tickers}).to_csv(cache, index=False)
-    with open(name_cache, "w") as f:
-        json.dump(name_map, f)
-
-    return tickers, name_map, f"fresh — NSE only: {len(tickers)} stocks"
+    return [], {}, "universe unavailable"
 
 # ── EMA + 200 DMA ─────────────────────────────────────────────────────────────
 
@@ -553,42 +557,48 @@ def api_pulse(tier):
         return jsonify({"error": "Unknown tier"}), 400
     return jsonify(compute_pulse(TIER_CONFIG[tier]))
 
+CACHE_MAX_AGE_HOURS = 6   # rescan if cache older than this
+
 @app.route("/api/screen/base/<tier>")
 @login_required
 def api_screen_base(tier):
     """
-    Serves instantly from nightly cache.
-    If cache is missing, tells user to run nightly_scan.py.
-    Manual rescan available via /api/scan/run (background thread).
+    Serves from cache if fresh (< CACHE_MAX_AGE_HOURS).
+    Marks cache stale and prompts rescan if too old.
     """
     if tier not in TIER_CONFIG:
         return jsonify({"error": "Unknown tier"}), 400
 
     cache_path = os.path.join(CACHE_DIR, f"base_{tier}_{date.today()}.json")
     if os.path.exists(cache_path):
+        age_h = (time.time() - os.path.getmtime(cache_path)) / 3600
         with open(cache_path) as f:
             results = json.load(f)
+        scanned_at = datetime.fromtimestamp(os.path.getmtime(cache_path)).strftime("%H:%M")
         return jsonify({
-            "type":    "done",
-            "results": results,
-            "tier":    tier,
-            "date":    str(date.today()),
-            "source":  "cache",
+            "type":       "done",
+            "results":    results,
+            "tier":       tier,
+            "date":       str(date.today()),
+            "scanned_at": scanned_at,
+            "age_h":      round(age_h, 1),
+            "stale":      age_h > CACHE_MAX_AGE_HOURS,
+            "source":     "cache",
         })
 
-    # No cache for today
+    # No cache yet
     lock = os.path.join(CACHE_DIR, "scan.lock")
     if os.path.exists(lock):
-        # Auto-clear stale lock older than 30 min
         age_min = (time.time() - os.path.getmtime(lock)) / 60
         if age_min > 30:
             os.remove(lock)
         else:
-            return jsonify({"type": "scanning", "message": f"Scan in progress ({int(age_min)}m elapsed) — check back shortly."}), 202
+            return jsonify({"type": "scanning",
+                            "message": f"Scan in progress ({int(age_min)}m elapsed)…"}), 202
 
     return jsonify({
         "type":    "no_cache",
-        "message": "No scan for today yet. Click RESCAN to build cache (~10-15 min).",
+        "message": "No scan yet today. Click RESCAN to build (~10-15 min).",
     }), 404
 
 @app.route("/api/screen/pulse/<tier>")

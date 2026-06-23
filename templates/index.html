@@ -802,8 +802,15 @@ function runScreen1() {
       const d = await r.json();
       if (d.type === 'done') {
         document.getElementById('s1Bar').style.width = '100%';
+        const staleWarn = d.stale ? ` ⚠ STALE (${d.age_h}h old — rescan recommended)` : '';
         document.getElementById('s1ProgText').textContent =
-          `Loaded from cache — ${d.results.length} stocks (${d.date})`;
+          `Loaded ${d.results.length} stocks · scanned at ${d.scanned_at}${staleWarn}`;
+        if (d.stale) {
+          document.getElementById('s1ProgText').style.color = 'var(--yellow)';
+          showToast(`Cache is ${d.age_h}h old — click RESCAN to refresh`);
+        } else {
+          document.getElementById('s1ProgText').style.color = '';
+        }
         btn.textContent = '↻ RELOAD';
         btn.disabled = false;
         allResults = d.results;

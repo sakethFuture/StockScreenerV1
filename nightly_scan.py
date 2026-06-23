@@ -146,15 +146,34 @@ def fetch_bse():
         return []
 
 def build_universe():
+    """Always fetch fresh from NSE — never use stale cache."""
     cache      = os.path.join(CACHE_DIR, "universe_v2.csv")
     name_cache = os.path.join(CACHE_DIR, "name_map.json")
-    nse_rows   = fetch_nse()   # NSE only — BSE removed (numeric codes, no MCap data)
-    tickers    = [t for t, _, _, _ in nse_rows]
-    name_map   = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
+
+    nse_rows = fetch_nse()
+    if not nse_rows:
+        log("WARNING: NSE fetch failed — falling back to cached universe")
+        if os.path.exists(cache):
+            df = pd.read_csv(cache)
+            with open(name_cache) as f:
+                nm = json.load(f)
+            log(f"  Using cached universe: {len(df)} tickers")
+            return df["ticker"].tolist(), nm
+        log("ERROR: No universe available")
+        return [], {}
+
+    tickers  = [t for t, _, _, _ in nse_rows]
+    name_map = {t: {"symbol": s, "name": n} for t, _, s, n in nse_rows}
+
+    # Delete old universe cache so next run picks up new listings
+    for f_name in os.listdir(CACHE_DIR):
+        if f_name.startswith("universe"):
+            os.remove(os.path.join(CACHE_DIR, f_name))
+
     pd.DataFrame({"ticker": tickers}).to_csv(cache, index=False)
     with open(name_cache, "w") as f:
         json.dump(name_map, f)
-    log(f"Universe: NSE only — {len(tickers)} tickers")
+    log(f"Universe: {len(tickers)} NSE tickers (fresh)")
     return tickers, name_map
 
 # ── EMA screen ────────────────────────────────────────────────────────────────
@@ -329,6 +348,13 @@ def run_scan():
             bucket.append(entry)
 
         bucket.sort(key=lambda x: (stage_ord.get(x["stage"], 9), x["spread_8_55"]))
+        # Remove yesterday's cache for this tier before writing
+        for old_f in os.listdir(CACHE_DIR):
+            if old_f.startswith(f"base_{tier_key}_") and not old_f.endswith(f"{today}.json"):
+                os.remove(os.path.join(CACHE_DIR, old_f))
+            if old_f.startswith(f"pulse_{tier_key}_") and not old_f.endswith(f"{today}.json"):
+                os.remove(os.path.join(CACHE_DIR, old_f))
+
         cache_path = os.path.join(CACHE_DIR, f"base_{tier_key}_{today}.json")
         with open(cache_path, "w") as f:
             json.dump(bucket, f)
